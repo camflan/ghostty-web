@@ -388,6 +388,21 @@ export class GhosttyTerminal {
     this.impl.resetMouseEncoder();
   }
 
+  /**
+   * @internal libghostty-vt only: the bytes to send to the pty for pasted
+   * text, per the terminal's live state (upstream `ghostty_terminal_paste`).
+   * Unsafe control bytes become spaces; the text is framed with CSI 200~/201~
+   * when bracketed paste (2004) is on, or has LF converted to CR when off.
+   * Multiline/unsafe text is allowed without a prompt, as ghostty-web always
+   * pasted it. Returns an owned copy; empty for empty text. Pending
+   * `readResponse()` replies are neither consumed nor included.
+   */
+  encodePaste(text: string): Uint8Array {
+    this.assertLive();
+    if (!this.impl.encodePaste) throw nativeOnly(this.kind, 'encodePaste');
+    return this.impl.encodePaste(new TextEncoder().encode(text));
+  }
+
   // ==========================================================================
   // RenderState API
   // ==========================================================================

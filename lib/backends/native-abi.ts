@@ -33,6 +33,7 @@ const REQUIRED_EXPORTS = {
   ghostty_terminal_set: 3,
   ghostty_terminal_get: 3,
   ghostty_terminal_vt_write: 3,
+  ghostty_terminal_paste: 3,
   ghostty_terminal_grid_ref: 3,
   ghostty_grid_ref_cell: 2,
   ghostty_grid_ref_row: 2,
@@ -252,6 +253,7 @@ function resolveLayout(r: Resolver) {
     'GhosttyStyle',
     'GhosttyGridRef',
     'GhosttyMouseEncoderSize',
+    'GhosttyPaste',
   ]) {
     r.sized(t);
   }
@@ -385,6 +387,25 @@ function resolveLayout(r: Resolver) {
       size: r.size('GhosttyMousePosition'),
       ...r.struct('GhosttyMousePosition', { x: 4, y: 4 }),
     },
+    pasteSource: r.enums('GhosttyPasteSource', ['TEXT'] as const),
+    clipboardLocation: r.enums('GhosttyClipboardLocation', ['STANDARD'] as const),
+    paste: {
+      size: r.size('GhosttyPaste'),
+      ...r.struct('GhosttyPaste', {
+        location: 4,
+        source: 4,
+        mimes: 4,
+        mimes_len: 4,
+        reader: 8,
+        allow_unsafe: 1,
+      }),
+    },
+    string: {
+      size: r.size('GhosttyString'),
+      ...r.struct('GhosttyString', { ptr: 4, len: 4 }),
+    },
+    mimeReader: r.struct('GhosttyMimeReader', { read: 4, userdata: 4 }),
+    writer: r.struct('GhosttyWriter', { write: 4, userdata: 4 }),
     sizeReport: {
       size: r.size('GhosttySizeReportSize'),
       ...r.struct('GhosttySizeReportSize', { rows: 2, columns: 2, cell_width: 4, cell_height: 4 }),

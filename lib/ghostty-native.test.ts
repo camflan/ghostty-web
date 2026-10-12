@@ -163,6 +163,21 @@ describe('libghostty-vt detection', () => {
     expect(() => new Ghostty(instance)).toThrow('GhosttyCell.style_id is 15 bits, expected 16');
   });
 
+  test('paste exports and manifest entries are required', () => {
+    const missing = patchedExports((ex) => {
+      ex.ghostty_terminal_paste = undefined;
+    });
+    expect(() => new Ghostty(missing)).toThrow('missing export ghostty_terminal_paste');
+    const instance = patchedManifest((manifest) => {
+      manifest.types.GhosttyPasteSource.values.TEXT = undefined;
+      manifest.types.GhosttyPaste.fields.allow_unsafe = undefined;
+      manifest.types.GhosttyWriter.fields.write.size = 8;
+    });
+    expect(() => new Ghostty(instance)).toThrow(
+      'missing GhosttyPasteSource.TEXT; missing field GhosttyPaste.allow_unsafe; GhosttyWriter.write is 8 bytes, expected 4'
+    );
+  });
+
   test('mouse input exports and manifest entries are required', () => {
     for (const name of [
       'ghostty_mouse_encoder_setopt',
@@ -920,5 +935,149 @@ describe('libghostty-vt mouse input', () => {
     expect(encodersFreed).toBe(2);
     expect(() => enc(t, 'motion', null, 5, 5)).toThrow('GhosttyTerminal has been freed');
     expect(() => t.resetMouseEncoder()).toThrow('GhosttyTerminal has been freed');
+  });
+});
+
+describe('libghostty-vt paste', () => {
+  /** Encoded paste as a byte-per-char string (never decoded as UTF-8). */
+  const paste = (t: GhosttyTerminal, text: string) =>
+    Buffer.from(t.encodePaste(text)).toString('latin1');
+  const utf8 = (text: string) => Buffer.from(text, 'utf8').toString('latin1');
+  const bracket = (inner: string) => `\x1b[200~${inner}\x1b[201~`;
+
+  test('empty text writes nothing in either mode', () => {
+    withTerm(10, 2, (t) => {
+      expect(t.encodePaste('').length).toBe(0);
+      t.write('\x1b[?2004h');
+      expect(t.encodePaste('').length).toBe(0);
+      expect(t.hasResponse()).toBe(false);
+    });
+  });
+
+  test('Unicode passes through as UTF-8', () => {
+    withTerm(10, 2, (t) => {
+      const text = 'héllo 世界 🎉 é';
+      expect(paste(t, text)).toBe(utf8(text));
+      expect(Array.from(t.encodePaste('\ud800'))).toEqual([0xef, 0xbf, 0xbd]);
+      t.write('\x1b[?2004h');
+      expect(paste(t, text)).toBe(bracket(utf8(text)));
+    });
+  });
+
+  test('newlines become CR unbracketed and stay as-is bracketed', () => {
+    withTerm(10, 2, (t) => {
+      const text = 'a\nb\r\nc\rd\n';
+      expect(paste(t, text)).toBe('a\rb\r\rc\rd\r');
+      t.write('\x1b[?2004h');
+      expect(paste(t, text)).toBe(bracket(text));
+    });
+  });
+
+  test('unsafe control bytes become spaces; other text is kept', () => {
+    withTerm(10, 2, (t) => {
+      const stripped = '\x00\x03\x04\x05\x08\x0f\x11\x12\x13\x15\x16\x17\x1a\x1b\x1c\x7f';
+      expect(paste(t, `<${stripped}>`)).toBe(`<${' '.repeat(stripped.length)}>`);
+      expect(paste(t, 'a\tb')).toBe('a\tb');
+      t.write('\x1b[?2004h');
+      expect(paste(t, 'x\x1by\x7f')).toBe(bracket('x y '));
+    });
+  });
+
+  test('an embedded bracket terminator cannot end the paste early', () => {
+    withTerm(10, 2, (t) => {
+      const text = 'a\x1b[201~b\x1b[200~c\nd';
+      expect(paste(t, text)).toBe('a [201~b [200~c\rd');
+      t.write('\x1b[?2004h');
+      expect(paste(t, text)).toBe(bracket('a [201~b [200~c\nd'));
+    });
+  });
+
+  test('framing follows the live bracketed paste mode, including RIS', () => {
+    withTerm(10, 2, (t) => {
+      const steps: [string, string][] = [];
+      for (const seq of ['', '\x1b[?2004h', '\x1b[?2004l', '\x1b[?2004h', '\x1bc']) {
+        t.write(seq);
+        steps.push([seq, paste(t, 'p\nq')]);
+      }
+      expect(steps).toEqual([
+        ['', 'p\rq'],
+        ['\x1b[?2004h', bracket('p\nq')],
+        ['\x1b[?2004l', 'p\rq'],
+        ['\x1b[?2004h', bracket('p\nq')],
+        ['\x1bc', 'p\rq'],
+      ]);
+      expect(t.getMode(2004)).toBe(false);
+    });
+  });
+
+  test('large pastes stream through several chunks into one owned copy', () => {
+    withTerm(10, 2, (t, g) => {
+      const impl = (t as unknown as { impl: { onWritePty(p: number, n: number): void } }).impl;
+      const original = impl.onWritePty.bind(impl);
+      let chunks = 0;
+      impl.onWritePty = (p, n) => {
+        chunks++;
+        original(p, n);
+      };
+      const line = `${'0123456789abcdé'.repeat(10)}\n`;
+      const text = line.repeat(2000); // > 300 KB: several reader and WRITE_PTY chunks
+      const memory = (g as unknown as { memory: WebAssembly.Memory }).memory;
+      const before = memory.buffer.byteLength;
+      t.write('\x1b[?2004h');
+      const out = t.encodePaste(text);
+      expect(memory.buffer.byteLength).toBeGreaterThan(before); // grew mid-paste
+      expect(chunks).toBeGreaterThan(1);
+      expect(Buffer.from(out).toString('latin1')).toBe(bracket(utf8(text)));
+      expect(out.buffer).not.toBe(memory.buffer);
+      expect(out.buffer.byteLength).toBe(out.length);
+      out.fill(0);
+      expect(paste(t, 'z')).toBe(bracket('z'));
+      expect(t.hasResponse()).toBe(false);
+    });
+  });
+
+  test('queued replies stay untouched, in order, and separate from paste output', () => {
+    const g = fresh();
+    const t = g.createTerminal(10, 2);
+    const other = g.createTerminal(10, 2);
+    try {
+      t.write('\x1b[?2004h');
+      t.write('\x1b[c');
+      t.write('\x1b[5n'.repeat(80)); // 320 reply bytes: read back in two chunks
+      other.write('\x1b[6n');
+      const first = t.readResponse()!;
+      expect(first.startsWith('\x1b[?62;22c\x1b[0n')).toBe(true);
+      expect(paste(t, 'one')).toBe(bracket('one'));
+      expect(paste(other, 'two')).toBe('two');
+      t.write('\x1b[6n');
+      expect(first + drain(t).join('')).toBe(`\x1b[?62;22c${'\x1b[0n'.repeat(80)}\x1b[1;1R`);
+      expect(drain(other)).toEqual(['\x1b[1;1R']);
+    } finally {
+      other.free();
+      t.free();
+    }
+  });
+
+  test('a failing reader writes nothing and leaves the terminal usable', () => {
+    let failAlloc = false;
+    const instance = patchedExports((ex) => {
+      const alloc = ex.ghostty_wasm_alloc as (n: number) => number;
+      ex.ghostty_wasm_alloc = (n: number) => (failAlloc ? 0 : alloc(n));
+    });
+    const t = new Ghostty(instance).createTerminal(10, 2);
+    try {
+      t.write('\x1b[5n');
+      failAlloc = true;
+      // Staging needs a bigger input buffer than the 4-byte write left behind.
+      expect(() => t.encodePaste('x'.repeat(100))).toThrow('ghostty_wasm_alloc(128) failed');
+      failAlloc = false;
+      expect(paste(t, 'ok\n')).toBe('ok\r');
+      t.write('\x1b[?2004h');
+      expect(paste(t, 'ok')).toBe(bracket('ok'));
+      expect(drain(t)).toEqual(['\x1b[0n']);
+    } finally {
+      t.free();
+    }
+    expect(() => t.encodePaste('x')).toThrow('GhosttyTerminal has been freed');
   });
 });

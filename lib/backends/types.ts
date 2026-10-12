@@ -119,6 +119,14 @@ export interface TerminalBackend {
   encodeMouseEvent?(event: NativeMouseEvent): Uint8Array;
   /** Forget the last reported motion cell (the next motion is reported even in the same cell). */
   resetMouseEncoder?(): void;
+  /**
+   * Encode pasted UTF-8 text for the pty per the terminal's live state
+   * (upstream `ghostty_terminal_paste`: unsafe controls become spaces, framed
+   * per mode 2004 or LF -> CR). Host policy: unsafe text is allowed (no
+   * prompt), text/plain only, never a Kitty paste event. Returns an owned
+   * copy (empty for empty text); queued replies are untouched.
+   */
+  encodePaste?(data: Uint8Array): Uint8Array;
 }
 
 export interface KeyEncoderBackend {

@@ -47,6 +47,8 @@ const RESPONSE_CHUNK = 256;
  * defined. Neither bound is reachable by a real pointer.
  */
 const MOUSE_PX_LIMIT = 2 ** 24;
+/** The only representation a paste offers: plain text, read on demand. */
+const TEXT_PLAIN = new TextEncoder().encode('text/plain');
 
 const MOUSE_ACTIONS = {
   press: 'PRESS',
@@ -91,8 +93,9 @@ export class NativeBackend implements VtBackend {
   private readonly terminals = new Map<number, NativeTerminal>();
   private writePtyIndex = 0;
   private sizeIndex = 0;
+  private pasteReaderIndex = 0;
   private callbackError: unknown = undefined;
-  /** True while a vt_write is running on any terminal of this instance. */
+  /** True while a vt_write or paste is running on any terminal of this instance. */
   writing = false;
 
   constructor(readonly abi: NativeAbi) {}
@@ -161,6 +164,29 @@ export class NativeBackend implements VtBackend {
     return this.sizeIndex;
   }
 
+  /**
+   * @internal Shared paste MIME reader trampoline:
+   * `bool (userdata = terminal handle, const GhosttyString *mime, const GhosttyWriter *writer)`
+   * (by-value structs are passed by pointer on wasm32). A false return fails
+   * the paste with IO_ERROR; the recorded error is rethrown after the call.
+   */
+  pasteReaderCallback(): number {
+    if (!this.pasteReaderIndex) {
+      this.pasteReaderIndex = this.abi.addFunction(3, true, (handle, mime, writer) => {
+        try {
+          const terminal = this.terminals.get(handle);
+          if (!terminal)
+            throw new Error(`libghostty-vt: paste read for unknown terminal ${handle}`);
+          return terminal.onPasteRead(mime, writer) ? 1 : 0;
+        } catch (error) {
+          this.callbackError ??= error;
+          return 0;
+        }
+      });
+    }
+    return this.pasteReaderIndex;
+  }
+
   /** @internal Rethrow the first error recorded by a callback during the last write. */
   rethrowCallbackError(): void {
     if (this.callbackError !== undefined) {
@@ -188,6 +214,9 @@ class Scratch {
   readonly mode: number;
   readonly mouseSize: number;
   readonly mousePosition: number;
+  readonly paste: number;
+  readonly pasteMime: number;
+  readonly pasteMimeText: number;
 
   constructor(abi: NativeAbi) {
     const L = abi.layout;
@@ -211,6 +240,9 @@ class Scratch {
       mode: take(L.modeConfig.size),
       mouseSize: take(L.mouseEncoderSize.size),
       mousePosition: take(L.mousePosition.size),
+      paste: take(L.paste.size),
+      pasteMime: take(L.string.size),
+      pasteMimeText: take(TEXT_PLAIN.length),
     };
     this.size = offset;
     this.base = abi.alloc(offset);
@@ -227,6 +259,9 @@ class Scratch {
     this.mode = this.base + rel.mode;
     this.mouseSize = this.base + rel.mouseSize;
     this.mousePosition = this.base + rel.mousePosition;
+    this.paste = this.base + rel.paste;
+    this.pasteMime = this.base + rel.pasteMime;
+    this.pasteMimeText = this.base + rel.pasteMimeText;
   }
 }
 
@@ -367,6 +402,9 @@ export class NativeTerminal implements TerminalBackend {
 
   // ---- replies queued by WRITE_PTY, in order ----
   private replies: Uint8Array[] = [];
+  /** During `encodePaste` only: the text being read and the paste's own WRITE_PTY output. */
+  private pasteText: Uint8Array | null = null;
+  private pasteOutput: Uint8Array[] | null = null;
   private readonly decoder = new TextDecoder();
 
   constructor(
@@ -800,6 +838,118 @@ export class NativeTerminal implements TerminalBackend {
     this.mouseGeometry = { cols: this.cols, rows: this.rows, cellWidth, cellHeight };
   }
 
+  // ==========================================================================
+  // Paste
+  // ==========================================================================
+
+  /**
+   * Encode pasted UTF-8 text for the pty with upstream `ghostty_terminal_paste`,
+   * applying the terminal's live state: unsafe control bytes become spaces,
+   * then the text is framed with CSI 200~/201~ when mode 2004 is on, or has
+   * LF converted to CR when it is off.
+   *
+   * Host policy: the paste offers one `text/plain` representation with
+   * source TEXT and `allow_unsafe` set. ghostty-web pastes multiline text
+   * without asking, so the native "could inject commands" refusal (newline
+   * unbracketed, CSI 201~ bracketed) is not used and nothing prompts; the
+   * stripping above still neutralizes an embedded ESC. No clipboard_read
+   * callback is installed, so it is never a Kitty (mode 5522) paste event.
+   *
+   * Returns an owned copy of everything the paste wrote (several WRITE_PTY
+   * chunks, in order); empty for empty text. Queued protocol replies are not
+   * touched and never included.
+   */
+  encodePaste(data: Uint8Array): Uint8Array {
+    if (this.backend.writing) {
+      throw new Error('libghostty-vt: paste while a write is in progress');
+    }
+    if (data.length === 0) return new Uint8Array(0);
+    const abi = this.abi;
+    const L = this.L;
+    const reader = this.backend.pasteReaderCallback();
+    const s = this.scratch!;
+    const P = L.paste;
+    const S = L.string;
+    const R = L.mimeReader;
+    const bytes = abi.bytes();
+    bytes.set(TEXT_PLAIN, s.pasteMimeText);
+    bytes.fill(0, s.paste, s.paste + P.size);
+    const view = abi.view();
+    view.setUint32(s.pasteMime + S.ptr, s.pasteMimeText, true);
+    view.setUint32(s.pasteMime + S.len, TEXT_PLAIN.length, true);
+    view.setUint32(s.paste, P.size, true); // sized struct: leading size_t (u32 on wasm32)
+    view.setInt32(s.paste + P.location, L.clipboardLocation.STANDARD, true);
+    view.setInt32(s.paste + P.source, L.pasteSource.TEXT, true);
+    view.setUint32(s.paste + P.mimes, s.pasteMime, true);
+    view.setUint32(s.paste + P.mimes_len, 1, true);
+    view.setUint32(s.paste + P.reader + R.read, reader, true);
+    view.setUint32(s.paste + P.reader + R.userdata, this.handle, true);
+    view.setUint8(s.paste + P.allow_unsafe, 1);
+
+    let result: number;
+    let output: Uint8Array[];
+    this.backend.writing = true;
+    this.pasteText = data;
+    this.pasteOutput = [];
+    try {
+      result = abi.exports.ghostty_terminal_paste(this.handle, s.paste, 0) as number;
+    } finally {
+      output = this.pasteOutput;
+      this.pasteText = null;
+      this.pasteOutput = null;
+      this.backend.writing = false;
+    }
+    // A reader/WRITE_PTY failure explains a failed result best; upstream
+    // writes nothing on any error.
+    this.backend.rethrowCallbackError();
+    abi.check(result, 'ghostty_terminal_paste');
+    if (output.length === 1) return output[0];
+    const out = new Uint8Array(output.reduce((n, chunk) => n + chunk.length, 0));
+    let at = 0;
+    for (const chunk of output) {
+      out.set(chunk, at);
+      at += chunk.length;
+    }
+    return out;
+  }
+
+  /**
+   * @internal Paste MIME reader: stream the pending text to the native writer
+   * in WRITE_CHUNK pieces staged in the input buffer. Memory may grow during
+   * every writer call, so views are re-acquired for each chunk.
+   */
+  onPasteRead(mime: number, writer: number): boolean {
+    const text = this.pasteText;
+    if (!text) throw new Error('libghostty-vt: paste read outside a paste');
+    const abi = this.abi;
+    const S = this.L.string;
+    const W = this.L.writer;
+    const view = abi.view();
+    // Upstream passes our own mimes entry through unchanged.
+    if (
+      view.getUint32(mime + S.ptr, true) !== this.scratch!.pasteMimeText ||
+      view.getUint32(mime + S.len, true) !== TEXT_PLAIN.length
+    ) {
+      throw new Error('libghostty-vt: paste read for an unknown MIME type');
+    }
+    const writeIndex = view.getUint32(writer + W.write, true);
+    const userdata = view.getUint32(writer + W.userdata, true);
+    const write = abi.exports.__indirect_function_table.get(writeIndex) as
+      | ((userdata: number, ptr: number, len: number) => number)
+      | null;
+    if (typeof write !== 'function') {
+      throw new Error(`libghostty-vt: paste writer ${writeIndex} is not a function`);
+    }
+    for (let start = 0; start < text.length; start += WRITE_CHUNK) {
+      const chunk = text.subarray(start, Math.min(text.length, start + WRITE_CHUNK));
+      const ptr = this.input.ensure(chunk.length);
+      abi.bytes().set(chunk, ptr);
+      // A refused write (out of memory) fails the paste; stop as documented.
+      if (!write(userdata, ptr, chunk.length)) return false;
+    }
+    return true;
+  }
+
   /** Unknown modes report false (the native API answers INVALID_VALUE for them). */
   getMode(mode: number, isAnsi: boolean): boolean {
     // GhosttyMode packs the number into 15 bits; larger values are not modes.
@@ -915,9 +1065,13 @@ export class NativeTerminal implements TerminalBackend {
   // Replies (WRITE_PTY effect)
   // ==========================================================================
 
-  /** @internal Copy reply bytes immediately; they are only valid during the callback. */
+  /**
+   * @internal Copy WRITE_PTY bytes immediately; they are only valid during the
+   * callback. During a paste they are the paste's output and never mix with
+   * the queued protocol replies.
+   */
   onWritePty(ptr: number, len: number): void {
-    if (len > 0) this.replies.push(this.abi.bytes().slice(ptr, ptr + len));
+    if (len > 0) (this.pasteOutput ?? this.replies).push(this.abi.bytes().slice(ptr, ptr + len));
   }
 
   hasResponse(): boolean {
