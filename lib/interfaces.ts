@@ -10,7 +10,13 @@ export interface ITerminalOptions {
   cursorBlink?: boolean; // Default: false
   cursorStyle?: 'block' | 'underline' | 'bar';
   theme?: ITheme;
-  scrollback?: number; // Default: 10000
+  /**
+   * Native scrollback budget in physical lines (default 10000).
+   * Positive values are approximate: Ghostty allocates/prunes whole pages, so
+   * retained history varies with page capacity, width and content. Zero disables
+   * history. This is deliberately not an exact xterm.js line-retention guarantee.
+   */
+  scrollback?: number;
   fontSize?: number; // Default: 15
   fontFamily?: string; // Default: 'monospace'
   allowTransparency?: boolean;

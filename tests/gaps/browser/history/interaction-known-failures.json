@@ -1,0 +1,142 @@
+[
+  {
+    "id": "scroll.wheel-partial-line-delta-shows-contiguous-rows",
+    "finding": "WEB-09/IX-02",
+    "reason": "A pixel wheel delta that is not a whole number of rows leaves viewportY fractional (6.25); the renderer then fetches the boundary row from scrollback index scrollbackLength (past the end) and draws a wrong line (594) on row 6. Native Ghostty scrolls whole rows and keeps the remainder.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "rows-after-100px",
+      "expected": [582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593],
+      "actual": [582, 583, 584, 585, 586, 587, 594, 589, 590, 591, 592, 593]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "scroll.scrollbar-drag-past-top-clamps-to-oldest",
+    "finding": "WEB-09/IX-01",
+    "reason": "Scrollbar drag motion is only handled by a mousemove listener on the terminal element, so once the pointer leaves it the thumb stops at the last in-element position (viewportY 571) instead of clamping to the top (588).",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "drag-past-top-reaches-oldest",
+      "expected": 588,
+      "actual": 571
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "scroll.output-while-viewing-history-keeps-viewed-rows",
+    "finding": "WEB-09",
+    "reason": "Policy pending (product divergence; native target), not a row-correctness bug: ghostty-web deliberately follows xterm.js and jumps to the bottom on output (characterized by scroll.output-while-viewing-history-jumps-to-bottom); native Ghostty keeps the viewed history rows on screen.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "rows-after-output",
+      "expected": [568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579],
+      "actual": [591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "selection.soft-wrap-copies-without-newline",
+    "finding": "WEB-08",
+    "reason": "SelectionManager joins every row with \\n, including soft-wrapped continuations; Ghostty's selection string unwraps soft wraps.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "copied-unwraps-soft-wrap",
+      "expected": "abcdefghijklmno",
+      "actual": "abcdefghij\nklmno"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "selection.wide-and-combining-in-history",
+    "finding": "WEB-08",
+    "reason": "In history rows the combining mark is copied correctly, but the wide character's spacer cell is copied as an extra space.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "copied-text",
+      "expected": "é 一x",
+      "actual": "é 一 x"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "selection.survives-history-pruning",
+    "finding": "WEB-08/SW-07",
+    "reason": "Selection stores absolute row indices without rebasing after historical pages are pruned. An explicit 1000-line budget and 1000+200-line fixture prune on both engines while retaining line 999; the selection becomes empty instead of retaining that text.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "text-after-pruning",
+      "expected": "L0999",
+      "actual": ""
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Explicit-budget fixture run on legacy0789394 and candidate8b218c0: both prune while retaining line999, both return empty selection. Same desired content-anchoring invariant; old fixture failed setup on native because its corrected default history budget did not prune."
+    }
+  },
+  {
+    "id": "selection.reflow-keeps-selected-content",
+    "finding": "WEB-08",
+    "reason": "Selection coordinates are not remapped on resize/reflow; after the first line rewraps, the same absolute row/columns select different content.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "text-after-reflow",
+      "expected": "second",
+      "actual": "abcdef"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  }
+]

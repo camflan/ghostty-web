@@ -67,20 +67,57 @@ websocket.onmessage = (e) => term.write(e.data);
 
 For a comprehensive client <-> server example, refer to the [demo](./demo/index.html#L141).
 
+## Scrollback behavior
+
+`scrollback` is Ghostty's **approximate physical-line budget** (default 10000).
+Ghostty allocates and prunes whole pages, so the history actually retained varies
+with terminal width and content; it is not an exact xterm.js line cap or a minimum
+retention guarantee. `scrollback: 0` disables history. Buffer APIs report the rows
+actually retained. Exact xterm-style retention is deferred rather than emulated
+with a hidden JavaScript clamp.
+
 ## Development
 
-ghostty-web builds from Ghostty's source with a [patch](./patches/ghostty-wasm-api.patch) to expose additional
-functionality.
-
-> Requires Zig and Bun.
+ghostty-web builds the upstream **libghostty-vt C/WASM API** without a production
+patch. Exact source revisions, compiler versions, hashes and size budgets live in
+[`ghostty-build.json`](./ghostty-build.json). The current target requires **Zig 0.16.0**
+and Bun. Builds use isolated owned directories and never modify the submodule checkout.
 
 ```bash
+bun install --frozen-lockfile
 bun run build
 ```
 
-Mitchell Hashimoto (author of Ghostty) has [been working](https://mitchellh.com/writing/libghostty-is-coming) on `libghostty` which makes this all possible. The patches are very minimal thanks to the work the Ghostty team has done, and we expect them to get smaller.
+The previous custom-ABI engine is retained temporarily for regression comparison and
+explicit rollback, not selected silently. It requires **Zig 0.15.2** and the archived
+[legacy patch](./patches/legacy/ghostty-wasm-api.patch):
 
-This library will eventually consume a native Ghostty WASM distribution once available, and will continue to provide an xterm.js compatible API.
+```bash
+# When both versions are installed, set their executable paths:
+export ZIG_0_16_BIN=/path/to/zig-0.16.0/zig
+export ZIG_0_15_BIN=/path/to/zig-0.15.2/zig
+bun run build:wasm:all
+bun run test:regression:matrix --legacy ./ghostty-vt-legacy.wasm --candidate ./ghostty-vt.wasm
+```
+
+An explicit WASM path can require its backend:
+
+```typescript
+import { Ghostty, Terminal } from 'ghostty-web';
+
+const ghostty = await Ghostty.load('/ghostty-vt.wasm', { backend: 'libghostty-vt' });
+const term = new Terminal({ ghostty });
+console.log(ghostty.backend); // 'libghostty-vt'; mismatched/malformed ABIs throw
+```
+
+`Ghostty`, `GhosttyTerminal`, `KeyEncoder` and the public cell/enumeration shapes remain
+compatible facades. Native layouts and enums are checked against the WASM's type manifest.
+Legacy public numeric key values are translated by semantic name on the native path.
+The default npm payload contains the native WASM only; hosts that need rollback can build
+and serve `ghostty-vt-legacy.wasm` separately and pass `{ backend: 'legacy' }`.
+
+See [the regression guide](./tests/README.md) for the short native/legacy CI gates and
+[the migration notes](./docs/migration-libghostty-vt.md) for behavior changes and limitations.
 
 At Coder we're big fans of Ghostty, so kudos to that team for all the amazing work.
 

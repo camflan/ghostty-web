@@ -101,6 +101,7 @@ export class Terminal implements ITerminalCore {
   private isOpen = false;
   private isDisposed = false;
   private animationFrameId?: number;
+  private focusTimeout?: ReturnType<typeof setTimeout>;
   private writeQueue: Uint8Array[] = [];
   private awaitingEcho = false;
 
@@ -131,6 +132,7 @@ export class Terminal implements ITerminalCore {
   private scrollbarVisible: boolean = false;
   private scrollbarOpacity: number = 0;
   private scrollbarHideTimeout?: number;
+  private scrollbarAnimationFrame?: number;
   private readonly SCROLLBAR_HIDE_DELAY_MS = 1500; // Hide after 1.5 seconds
   private readonly SCROLLBAR_FADE_DURATION_MS = 200; // 200ms fade animation
 
@@ -198,6 +200,9 @@ export class Terminal implements ITerminalCore {
         if (this.renderer) {
           this.renderer.setCursorStyle(this.options.cursorStyle);
           this.renderer.setCursorBlink(this.options.cursorBlink);
+          if (this.wasmTerm?.backend === 'libghostty-vt') {
+            this.wasmTerm.setDefaultCursorStyle(this.options.cursorStyle, this.options.cursorBlink);
+          }
         }
         break;
 
@@ -243,6 +248,7 @@ export class Terminal implements ITerminalCore {
 
     // Resize canvas to match new font metrics
     this.renderer.resize(this.cols, this.rows);
+    this.syncNativeCellSize();
 
     // Update canvas element dimensions to match renderer
     const metrics = this.renderer.getMetrics();
@@ -255,33 +261,34 @@ export class Terminal implements ITerminalCore {
     this.renderer.render(this.wasmTerm, true, this.viewportY, this);
   }
 
-  /**
-   * Parse a CSS color string to 0xRRGGBB format.
-   * Returns 0 if the color is undefined or invalid.
-   */
-  private parseColorToHex(color?: string): number {
-    if (!color) return 0;
+  /** Browser reports use CSS pixels, matching layout and mouse coordinates. */
+  private syncNativeCellSize(): void {
+    if (this.wasmTerm?.backend !== 'libghostty-vt' || !this.renderer) return;
+    const { width, height } = this.renderer.getMetrics();
+    this.wasmTerm.setCellPixelSize(width, height);
+    // Resize reports (mode 2048) are generated outside write(), so drain here too.
+    this.processTerminalResponses();
+  }
 
-    // Handle hex colors (#RGB, #RRGGBB)
-    if (color.startsWith('#')) {
-      let hex = color.slice(1);
-      if (hex.length === 3) {
-        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-      }
-      const value = Number.parseInt(hex, 16);
-      return Number.isNaN(value) ? 0 : value;
+  /** Parse supported CSS RGB colors; missing/invalid is distinct from explicit black. */
+  private parseColorToHex(color?: string): number | undefined {
+    if (!color) return undefined;
+    if (/^#[0-9a-f]{3}$/i.test(color)) {
+      return Number.parseInt(
+        color
+          .slice(1)
+          .split('')
+          .map((digit) => digit + digit)
+          .join(''),
+        16
+      );
     }
-
-    // Handle rgb(r, g, b) format
-    const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    if (match) {
-      const r = Number.parseInt(match[1], 10);
-      const g = Number.parseInt(match[2], 10);
-      const b = Number.parseInt(match[3], 10);
-      return (r << 16) | (g << 8) | b;
-    }
-
-    return 0;
+    if (/^#[0-9a-f]{6}$/i.test(color)) return Number.parseInt(color.slice(1), 16);
+    const match = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+    if (!match) return undefined;
+    const channels = match.slice(1).map(Number);
+    if (channels.some((channel) => channel > 255)) return undefined;
+    return (channels[0] << 16) | (channels[1] << 8) | channels[2];
   }
 
   /**
@@ -299,7 +306,7 @@ export class Terminal implements ITerminalCore {
     // Build palette array from theme colors
     // Order: black, red, green, yellow, blue, magenta, cyan, white,
     //        brightBlack, brightRed, brightGreen, brightYellow, brightBlue, brightMagenta, brightCyan, brightWhite
-    const palette: number[] = [
+    const palette = [
       this.parseColorToHex(theme?.black),
       this.parseColorToHex(theme?.red),
       this.parseColorToHex(theme?.green),
@@ -318,12 +325,24 @@ export class Terminal implements ITerminalCore {
       this.parseColorToHex(theme?.brightWhite),
     ];
 
+    const foreground = this.parseColorToHex(theme?.foreground);
+    const background = this.parseColorToHex(theme?.background);
+    const cursor = this.parseColorToHex(theme?.cursor);
     return {
       scrollbackLimit: scrollback,
-      fgColor: this.parseColorToHex(theme?.foreground),
-      bgColor: this.parseColorToHex(theme?.background),
-      cursorColor: this.parseColorToHex(theme?.cursor),
-      palette,
+      fgColor: foreground,
+      bgColor: background,
+      cursorColor: cursor,
+      palette: palette.map((value) => value ?? 0),
+      colorPresence: {
+        foreground: foreground !== undefined,
+        background: background !== undefined,
+        cursor: cursor !== undefined,
+        palette: palette.reduce<number>(
+          (mask, value, index) => (value === undefined ? mask : mask | (1 << index)),
+          0
+        ),
+      },
     };
   }
 
@@ -359,11 +378,7 @@ export class Terminal implements ITerminalCore {
       // this as an input element and don't intercept keyboard events.
       parent.setAttribute('contenteditable', 'true');
       // Prevent actual content editing - we handle input ourselves
-      parent.addEventListener('beforeinput', (e) => {
-        if (e.target === parent) {
-          e.preventDefault();
-        }
-      });
+      parent.addEventListener('beforeinput', this.handleContainerBeforeInput);
 
       // Add accessibility attributes for screen readers and extensions
       parent.setAttribute('role', 'textbox');
@@ -405,17 +420,10 @@ export class Terminal implements ITerminalCore {
       parent.appendChild(this.textarea);
 
       // Focus textarea on interaction - preventDefault before focus
-      const textarea = this.textarea;
       // Desktop: mousedown
-      this.canvas.addEventListener('mousedown', (ev) => {
-        ev.preventDefault();
-        textarea.focus();
-      });
+      this.canvas.addEventListener('mousedown', this.handleCanvasPointerFocus);
       // Mobile: touchend with preventDefault to suppress iOS caret
-      this.canvas.addEventListener('touchend', (ev) => {
-        ev.preventDefault();
-        textarea.focus();
-      });
+      this.canvas.addEventListener('touchend', this.handleCanvasPointerFocus);
 
       // Create renderer
       this.renderer = new CanvasRenderer(this.canvas, {
@@ -428,14 +436,18 @@ export class Terminal implements ITerminalCore {
 
       // Size canvas to terminal dimensions (use renderer.resize for proper DPI scaling)
       this.renderer.resize(this.cols, this.rows);
+      this.syncNativeCellSize();
+      if (this.wasmTerm.backend === 'libghostty-vt') {
+        this.wasmTerm.setDefaultCursorStyle(this.options.cursorStyle, this.options.cursorBlink);
+      }
 
       // Create mouse tracking configuration
       const canvas = this.canvas;
       const renderer = this.renderer;
-      const wasmTerm = this.wasmTerm;
+      // Read the handle lazily: never capture a wrapper that could outlive it.
       const mouseConfig: MouseTrackingConfig = {
-        hasMouseTracking: () => wasmTerm?.hasMouseTracking() ?? false,
-        hasSgrMouseMode: () => wasmTerm?.getMode(1006, false) ?? true, // SGR extended mode
+        hasMouseTracking: () => this.wasmTerm?.hasMouseTracking() ?? false,
+        hasSgrMouseMode: () => this.wasmTerm?.getMode(1006, false) ?? true, // SGR extended mode
         getCellDimensions: () => ({
           width: renderer.charWidth,
           height: renderer.charHeight,
@@ -479,7 +491,8 @@ export class Terminal implements ITerminalCore {
           return this.copySelection();
         },
         this.textarea,
-        mouseConfig
+        mouseConfig,
+        () => this.wasmTerm
       );
 
       // Create selection manager (pass textarea for context menu positioning)
@@ -693,6 +706,7 @@ export class Terminal implements ITerminalCore {
 
       // Resize renderer
       this.renderer!.resize(cols, rows);
+      this.syncNativeCellSize();
 
       // Update canvas dimensions
       const metrics = this.renderer!.getMetrics();
@@ -725,23 +739,57 @@ export class Terminal implements ITerminalCore {
   }
 
   /**
-   * Reset terminal state
+   * Perform a full terminal reset (RIS, like xterm.js `reset()`).
+   *
+   * Contract:
+   * - The reset happens in place on the same WASM terminal handle, so every
+   *   component keeps a valid reference (no freed or stale wrapper).
+   * - Screen and scrollback are cleared, the primary screen is active, the
+   *   cursor is at the home position and visible, and all terminal modes,
+   *   charsets, tab stops, scroll region and keyboard protocol state return to
+   *   their defaults. ghostty-web's default of grapheme clustering (mode 2027)
+   *   is re-applied.
+   * - Construction-time configuration is kept: theme colors, palette and
+   *   scrollback limit, dimensions and all options.
+   * - Host state is cleared: selection, viewport (scrolled back to the bottom,
+   *   firing `onScroll` if it moved), hovered links, link cache and title.
+   * - Any partially received escape sequence is discarded.
    */
   reset(): void {
     this.assertOpen();
 
-    // Free old WASM terminal and create new one
-    if (this.wasmTerm) {
-      this.wasmTerm.free();
+    // Host state first, so nothing renders against the pre-reset buffer.
+    this.selectionManager?.clearSelection();
+    if (this.scrollAnimationFrame) {
+      cancelAnimationFrame(this.scrollAnimationFrame);
+      this.scrollAnimationFrame = undefined;
     }
-    const config = this.buildWasmConfig();
-    this.wasmTerm = this.ghostty!.createTerminal(this.cols, this.rows, config);
-
-    // Clear renderer
-    this.renderer!.clear();
-
-    // Reset title
+    this.scrollAnimationStartTime = undefined;
+    this.scrollAnimationStartY = undefined;
+    this.targetViewportY = 0;
+    const viewportChanged = this.viewportY !== 0;
+    this.viewportY = 0;
+    this.currentHoveredLink?.hover?.(false);
+    this.currentHoveredLink = undefined;
+    this.renderer?.setHoveredHyperlinkId(0);
+    this.renderer?.setHoveredLinkRange(null);
+    this.linkDetector?.invalidateCache();
     this.currentTitle = '';
+
+    // RIS (ESC c) is an "anywhere" transition, so it also aborts a partial
+    // sequence. RIS restores the core's default modes, which do not include
+    // ghostty-web's grapheme-clustering default, so re-enable mode 2027.
+    this.wasmTerm!.write('\x1bc\x1b[?2027h');
+    // RIS produces no replies; drop anything a partial query may have left.
+    while (this.wasmTerm!.readResponse() !== null) {
+      // discard
+    }
+    this.lastCursorY = 0;
+
+    this.renderer!.clear();
+    this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
+    // Observers must see the reset buffer, not the old history with a new viewport.
+    if (viewportChanged) this.scrollEmitter.fire(0);
   }
 
   /**
@@ -754,7 +802,9 @@ export class Terminal implements ITerminalCore {
 
       // Also schedule a delayed focus as backup to ensure it sticks
       // (some browsers may need this if DOM isn't fully settled)
-      setTimeout(() => {
+      if (this.focusTimeout !== undefined) clearTimeout(this.focusTimeout);
+      this.focusTimeout = setTimeout(() => {
+        this.focusTimeout = undefined;
         this.element?.focus();
       }, 0);
     }
@@ -1099,26 +1149,19 @@ export class Terminal implements ITerminalCore {
     this.isDisposed = true;
     this.isOpen = false;
 
-    // Stop render loop and clear write queue
-    this.cancelRenderLoop();
+    // Stop render loop, animations and timers; clear write queue
+    this.stopTimersAndAnimations();
     this.writeQueue.length = 0;
 
-    // Stop smooth scroll animation
-    if (this.scrollAnimationFrame) {
-      cancelAnimationFrame(this.scrollAnimationFrame);
-      this.scrollAnimationFrame = undefined;
-    }
-
-    // Clear mouse move throttle timeout
-    if (this.mouseMoveThrottleTimeout) {
-      clearTimeout(this.mouseMoveThrottleTimeout);
-      this.mouseMoveThrottleTimeout = undefined;
-    }
-    this.pendingMouseMove = undefined;
-
-    // Dispose addons
+    // Dispose addons. A failing addon must not stop the remaining cleanup;
+    // its error is rethrown once everything has been released.
+    const addonErrors: unknown[] = [];
     for (const addon of this.addons) {
-      addon.dispose();
+      try {
+        addon.dispose();
+      } catch (error) {
+        addonErrors.push(error);
+      }
     }
     this.addons = [];
 
@@ -1135,11 +1178,59 @@ export class Terminal implements ITerminalCore {
     this.scrollEmitter.dispose();
     this.renderEmitter.dispose();
     this.cursorMoveEmitter.dispose();
+
+    if (addonErrors.length === 1) throw addonErrors[0];
+    if (addonErrors.length > 1) {
+      const error = new Error(`${addonErrors.length} addons failed to dispose`);
+      (error as Error & { errors: unknown[] }).errors = addonErrors;
+      throw error;
+    }
   }
 
   // ==========================================================================
   // Private Methods
   // ==========================================================================
+
+  /**
+   * Stop every timer and animation frame owned by the terminal (idempotent).
+   */
+  private stopTimersAndAnimations(): void {
+    this.cancelRenderLoop();
+    if (this.scrollAnimationFrame) {
+      cancelAnimationFrame(this.scrollAnimationFrame);
+      this.scrollAnimationFrame = undefined;
+    }
+    if (this.scrollbarAnimationFrame) {
+      cancelAnimationFrame(this.scrollbarAnimationFrame);
+      this.scrollbarAnimationFrame = undefined;
+    }
+    if (this.mouseMoveThrottleTimeout) {
+      clearTimeout(this.mouseMoveThrottleTimeout);
+      this.mouseMoveThrottleTimeout = undefined;
+    }
+    this.pendingMouseMove = undefined;
+    if (this.scrollbarHideTimeout) {
+      window.clearTimeout(this.scrollbarHideTimeout);
+      this.scrollbarHideTimeout = undefined;
+    }
+    if (this.focusTimeout !== undefined) {
+      clearTimeout(this.focusTimeout);
+      this.focusTimeout = undefined;
+    }
+  }
+
+  /** Keep `beforeinput` on the contenteditable container from editing it. */
+  private handleContainerBeforeInput = (e: Event): void => {
+    if (e.target === this.element) {
+      e.preventDefault();
+    }
+  };
+
+  /** Focus the hidden textarea on canvas mousedown/touchend. */
+  private handleCanvasPointerFocus = (e: Event): void => {
+    e.preventDefault();
+    this.textarea?.focus();
+  };
 
   /**
    * Cancel the render loop
@@ -1215,6 +1306,9 @@ export class Terminal implements ITerminalCore {
    * Clean up components (called on dispose or error)
    */
   private cleanupComponents(): void {
+    // Also reached from a failed open(): stop anything that may have started.
+    this.stopTimersAndAnimations();
+
     // Dispose selection manager
     if (this.selectionManager) {
       this.selectionManager.dispose();
@@ -1233,9 +1327,11 @@ export class Terminal implements ITerminalCore {
       this.renderer = undefined;
     }
 
-    // Remove canvas from DOM
-    if (this.canvas && this.canvas.parentNode) {
-      this.canvas.parentNode.removeChild(this.canvas);
+    // Remove canvas listeners and the canvas from DOM
+    if (this.canvas) {
+      this.canvas.removeEventListener('mousedown', this.handleCanvasPointerFocus);
+      this.canvas.removeEventListener('touchend', this.handleCanvasPointerFocus);
+      this.canvas.parentNode?.removeChild(this.canvas);
       this.canvas = undefined;
     }
 
@@ -1247,7 +1343,9 @@ export class Terminal implements ITerminalCore {
 
     // Remove event listeners
     if (this.element) {
-      this.element.removeEventListener('wheel', this.handleWheel);
+      // Options must match addEventListener: capture listeners need capture: true.
+      this.element.removeEventListener('wheel', this.handleWheel, { capture: true });
+      this.element.removeEventListener('beforeinput', this.handleContainerBeforeInput);
       this.element.removeEventListener('mousedown', this.handleMouseDown, { capture: true });
       this.element.removeEventListener('mousemove', this.handleMouseMove);
       this.element.removeEventListener('mouseleave', this.handleMouseLeave);
@@ -1260,15 +1358,10 @@ export class Terminal implements ITerminalCore {
       this.element.removeAttribute('aria-multiline');
     }
 
-    // Remove document-level listeners (only if opened)
-    if (this.isOpen && typeof document !== 'undefined') {
+    // Remove document-level listeners. dispose() and a failed open() both clear
+    // isOpen before getting here, so this must not depend on it.
+    if (typeof document !== 'undefined') {
       document.removeEventListener('mouseup', this.handleMouseUp);
-    }
-
-    // Clean up scrollbar timers
-    if (this.scrollbarHideTimeout) {
-      window.clearTimeout(this.scrollbarHideTimeout);
-      this.scrollbarHideTimeout = undefined;
     }
 
     // Dispose link detector
@@ -1772,6 +1865,8 @@ export class Terminal implements ITerminalCore {
    * Fade in scrollbar
    */
   private fadeInScrollbar(): void {
+    if (this.scrollbarAnimationFrame) cancelAnimationFrame(this.scrollbarAnimationFrame);
+    this.scrollbarAnimationFrame = undefined;
     const startTime = Date.now();
     const animate = () => {
       const elapsed = Date.now() - startTime;
@@ -1784,7 +1879,9 @@ export class Terminal implements ITerminalCore {
       }
 
       if (progress < 1) {
-        requestAnimationFrame(animate);
+        this.scrollbarAnimationFrame = requestAnimationFrame(animate);
+      } else {
+        this.scrollbarAnimationFrame = undefined;
       }
     };
     animate();
@@ -1794,6 +1891,8 @@ export class Terminal implements ITerminalCore {
    * Fade out scrollbar
    */
   private fadeOutScrollbar(): void {
+    if (this.scrollbarAnimationFrame) cancelAnimationFrame(this.scrollbarAnimationFrame);
+    this.scrollbarAnimationFrame = undefined;
     const startTime = Date.now();
     const startOpacity = this.scrollbarOpacity;
     const animate = () => {
@@ -1807,8 +1906,9 @@ export class Terminal implements ITerminalCore {
       }
 
       if (progress < 1) {
-        requestAnimationFrame(animate);
+        this.scrollbarAnimationFrame = requestAnimationFrame(animate);
       } else {
+        this.scrollbarAnimationFrame = undefined;
         this.scrollbarVisible = false;
         this.scrollbarOpacity = 0;
         // Final render to clear scrollbar completely

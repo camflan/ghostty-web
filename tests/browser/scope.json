@@ -1,0 +1,670 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "api.title-bell-and-cursor-move-callbacks",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.resize-updates-grid-and-canvas",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.deccolm-keeps-rendering-host-grid",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.paste-bracketed-when-2004-set",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.paste-unbracketed-converts-newlines",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-12 [js-layer]: paste() sends text verbatim when 2004 is off; Ghostty's paste encoder maps LF to CR. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "api.dispose-removes-dom",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "link.osc8-https-opens-on-ctrl-click",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "link.osc8-javascript-scheme-not-opened",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-14 [js-layer]: OSC 8 activation calls window.open for any URI scheme, including javascript:. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "comparator.detects-single-cell-edits-at-1",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "comparator.tolerance-and-png-encoding-at-1",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "comparator.detects-single-cell-edits-at-2",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "comparator.tolerance-and-png-encoding-at-2",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "cursor.option-block",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "cursor.option-bar",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "cursor.option-underline",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "cursor.moves-with-output",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "cursor.decscusr-steady-bar",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "RT-07 [backend]: Pinned bridge reports no cursor style (getCursor().style is a hard-coded TODO); the renderer only uses the cursorStyle option, so DECSCUSR is ignored. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "cursor.decscusr-steady-underline",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "RT-07 [backend]: Same root cause as cursor.decscusr-steady-bar: DECSCUSR 4 never reaches the renderer. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "cursor.dectcem-hide-erases-cursor",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "RT-07 [js-layer]: Hiding the cursor does not dirty its row; incremental frames never redraw it, so the old block stays on screen (a forced full render erases it). (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "cursor.dectcem-hide-with-output-on-row",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "dpr.display-change-updates-backing-size-once",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "dpr.idle-renders-do-not-resize-at-1",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "dpr.background-run-has-no-seams-at-1",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "dpr.idle-renders-do-not-resize-at-1-25",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "dpr.background-run-has-no-seams-at-1-25",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "RT-05 [js-layer]: Per-cell background rects land on fractional device pixels at DPR 1.25 and anti-alias, leaving seams at every non-integer cell boundary (pinned Chromium, 9px cells). (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "dpr.idle-renders-do-not-resize-at-2",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "dpr.background-run-has-no-seams-at-2",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "font.vendored-fonts-verified",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "font.wasm-identity-reported",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "font.missing-primary-font-fails-readiness",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "font.altered-alternate-font-fails-readiness",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "font.swapped-fonts-fail-readiness",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "input.printable-keys-emit-text",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "input.control-and-navigation-keys",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "input.decckm-application-cursor-keys",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "input.alt-letter-sends-esc-prefix",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-01 [js-layer]: InputHandler pushes only DECCKM into the key encoder and drops the Alt modifier, so Alt+b emits 'b' instead of ESC b. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "input.kitty-disambiguate-escape",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-03 [backend]: Kitty keyboard flags pushed by the application are never read back into the key encoder (no pinned getter), so Escape stays legacy ESC. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "input.kitty-exit-restores-control-keys",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "input.kitty-copy-shortcut-stays-in-browser",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "focus.reports-blur-and-focus-when-1004-set",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-07 [js-layer]: Nothing emits CSI O / CSI I on blur/focus even when mode 1004 is set. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "focus.no-reports-without-1004",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "incremental.overflow-ink-matches-full-render",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "RT-04 [js-layer]: Redrawing a dirty row's neighbour clears that neighbour's band, erasing mark ink that overflows from the undrawn row below; incremental != full. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "incremental.seeded-edits-match-full-render",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "incremental.detects-injected-missed-row-redraw",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.sgr-press-and-release",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.sgr-wheel-reported-when-tracking",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-06 [js-layer]: Terminal's capture-phase wheel handler stops propagation and scrolls/ignores, so InputHandler never encodes wheel reports while mouse tracking is on. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "mouse.drag-selects-text-and-highlights",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.drag-selects-wide-characters",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 [js-layer]: Selection text extraction emits a space for each wide-character spacer cell. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "options.ctor-theme-colors",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "options.font-family-alternate-bare",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "options.font-family-primary-bare",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "options.font-size-remeasures",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "options.runtime-font-size-matches-fresh",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "options.runtime-font-family-matches-fresh",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "options.runtime-font-change-keeps-right-edge",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "OPT-01 [js-layer]: handleFontChange calls renderer.render without scrollbarOpacity (defaults to 1), so renderScrollbar clears the right 14 CSS px of every row with the background; rows not redrawn later keep the hole. (provenance: tests/gaps/browser/history/option-known-failures.json)"
+    },
+    {
+      "id": "options.font-size-13-tall-glyphs-fit-cell",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "OPT-02 [js-layer]: CanvasRenderer.measureFont derives cell height and baseline from the ink box of 'M'; at 13px the dot of j, '|' and '(' extend past the cell and are clipped (15px happens to fit). (provenance: tests/gaps/browser/history/option-known-failures.json)"
+    },
+    {
+      "id": "options.runtime-theme-applies",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "OPT-03 [js-layer]: Terminal.handleOptionChange('theme') only logs 'theme changes after open() are not yet fully supported'; the renderer and WASM palette keep the constructor theme. (provenance: tests/gaps/browser/history/option-known-failures.json)"
+    },
+    {
+      "id": "options.runtime-font-size-matches-fresh-at-2x",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "color.bg-default-uses-theme-background",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "color.bg-explicit-truecolor",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "color.bg-sgr40-is-theme-black",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-04 [backend]: Theme colour #000000 becomes the 0 'unset' sentinel in the WASM config, so palette 0 falls back to Ghostty's default #1d1f21. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "color.bg-sgr40-uses-nonzero-theme-black",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "color.bg-256-index-16-is-black",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-04/RT-06 [js-layer]: Renderer treats any resolved rgb(0,0,0) background as 'default' and skips painting it, so explicit index 16 shows the theme background. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "color.bg-truecolor-black-is-black",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-04/RT-06 [js-layer]: Renderer treats explicit SGR 48;2;0;0;0 as 'default' background and paints the theme background instead. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "color.inverse-swaps-default-colors",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "color.fg-truecolor-full-block",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "color.fg-theme-black-on-light-theme",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-04 [backend]: Theme foreground #000000 becomes the 0 'unset' sentinel, so default text uses Ghostty's default #cccccc (near-invisible on a light theme). (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "text.glyph-has-ink-blank-cell-has-none",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "text.wide-char-advances-two-cells",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "text.combining-mark-renders-as-cluster",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "text.history-row-ascii-matches-active-row",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "text.history-row-grapheme-matches-active-row",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-09/RT-12 [js-layer]: When scrolled, the renderer looks up graphemes with the viewport row on the active screen, so the history cell draws active-row text ('L') instead of e+U+0301. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "perf.forced-frame-decodes-viewport-once",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-01 [js-layer]: getLine() re-decodes the whole viewport for every drawn row (12 rows + block cursor = 13 decodes per frame). (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "scene.dark-styles",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.light-theme",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.alternate-font",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.multiline-selection",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.history-viewport",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.wrapped-text",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.bar-cursor",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.resized-grid",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.comparator-rejects-missing-glyph-and-shift",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scene.review-montage",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.wheel-steps-show-expected-history-rows",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.wheel-clamps-at-top-and-bottom",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.wheel-partial-line-delta-shows-contiguous-rows",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-09/IX-02 [js-layer]: A pixel wheel delta that is not a whole number of rows leaves viewportY fractional (6.25); the renderer then fetches the boundary row from scrollback index scrollbackLength (past the end) and draws a wrong line (594) on row 6. Native Ghostty scrolls whole rows and keeps the remainder. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "scroll.smooth-wheel-settles-on-exact-rows",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.scrollbar-drag-tracks-pointer-and-rows",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.scrollbar-drag-past-top-clamps-to-oldest",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-09/IX-01 [js-layer]: Scrollbar drag motion is only handled by a mousemove listener on the terminal element, so once the pointer leaves it the thumb stops at the last in-element position (viewportY 571) instead of clamping to the top (588). (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "scroll.output-while-viewing-history-jumps-to-bottom",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.output-while-viewing-history-keeps-viewed-rows",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-09 [js-layer]: Policy pending (product divergence; native target), not a row-correctness bug: ghostty-web deliberately follows xterm.js and jumps to the bottom on output (characterized by scroll.output-while-viewing-history-jumps-to-bottom); native Ghostty keeps the viewed history rows on screen. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "scroll.control-wrong-and-stale-rows-are-detected",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.drag-forward-and-reverse-copy-and-highlight",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.control-shifted-or-missing-highlight-is-detected",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.history-drag-copies-history-lines",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.highlight-follows-content-offscreen-and-back",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.edge-autoscroll-extends-into-history",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.follows-content-when-output-scrolls",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "selection.soft-wrap-copies-without-newline",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 [js-layer]: SelectionManager joins every row with \\n, including soft-wrapped continuations; Ghostty's selection string unwraps soft wraps. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "selection.wide-and-combining-in-history",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 [js-layer]: In history rows the combining mark is copied correctly, but the wide character's spacer cell is copied as an extra space. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "selection.survives-history-pruning",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08/SW-07 [js-layer]: Selection stores absolute row indices without rebasing after historical pages are pruned. An explicit 1000-line budget and 1000+200-line fixture prune on both engines while retaining line 999; the selection becomes empty instead of retaining that text. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "selection.reflow-keeps-selected-content",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 [js-layer]: Selection coordinates are not remapped on resize/reflow; after the first line rewraps, the same absolute row/columns select different content. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+    },
+    {
+      "id": "sync.mode-2026-state-tracked",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "sync.hold-keeps-last-complete-frame",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "RT-09 [js-layer]: Mode 2026 is tracked by the terminal but the renderer ignores it and paints partial frames immediately. (provenance: tests/gaps/browser/history/known-failures.json)"
+    },
+    {
+      "id": "sync.release-paints-new-frame",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "manifest.scope-catalogue-matches",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    }
+  ]
+}

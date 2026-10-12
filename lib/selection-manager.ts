@@ -61,6 +61,11 @@ export class SelectionManager {
   private boundContextMenuHandler: ((e: MouseEvent) => void) | null = null;
   private boundClickHandler: ((e: MouseEvent) => void) | null = null;
   private boundDocumentMouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+  // Anonymous listeners registered through listen(), removed on dispose()
+  private registeredListeners: Array<[EventTarget, string, EventListener]> = [];
+  // Pending context-menu restore (timer + one-shot listeners), cancelled on dispose()
+  private contextMenuTimeout: ReturnType<typeof setTimeout> | null = null;
+  private contextMenuReset: (() => void) | null = null;
 
   // Auto-scroll state for drag selection
   private autoScrollInterval: ReturnType<typeof setInterval> | null = null;
@@ -418,7 +423,33 @@ export class SelectionManager {
       this.boundClickHandler = null;
     }
 
-    // Canvas event listeners will be cleaned up when canvas is removed from DOM
+    // Remove anonymous canvas/document listeners
+    for (const [target, type, listener] of this.registeredListeners) {
+      target.removeEventListener(type, listener);
+    }
+    this.registeredListeners = [];
+
+    // Cancel a pending context-menu restore and its one-shot listeners
+    this.cancelContextMenuReset();
+  }
+
+  /** Add a listener that dispose() removes. */
+  private listen<K extends keyof HTMLElementEventMap>(
+    target: EventTarget,
+    type: K,
+    listener: (e: HTMLElementEventMap[K]) => void
+  ): void {
+    target.addEventListener(type, listener as EventListener);
+    this.registeredListeners.push([target, type, listener as EventListener]);
+  }
+
+  /** Cancel the delayed context-menu restore; restores the textarea if armed. */
+  private cancelContextMenuReset(): void {
+    if (this.contextMenuTimeout !== null) {
+      clearTimeout(this.contextMenuTimeout);
+      this.contextMenuTimeout = null;
+    }
+    this.contextMenuReset?.();
   }
 
   // ==========================================================================
@@ -432,7 +463,7 @@ export class SelectionManager {
     const canvas = this.renderer.getCanvas();
 
     // Mouse down - start selection or clear existing
-    canvas.addEventListener('mousedown', (e: MouseEvent) => {
+    this.listen(canvas, 'mousedown', (e: MouseEvent) => {
       if (e.button === 0) {
         // Left click only
 
@@ -462,7 +493,7 @@ export class SelectionManager {
     });
 
     // Mouse move on canvas - update selection
-    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+    this.listen(canvas, 'mousemove', (e: MouseEvent) => {
       if (this.isSelecting) {
         // Check if drag threshold has been met
         if (!this.dragThresholdMet) {
@@ -490,7 +521,7 @@ export class SelectionManager {
     });
 
     // Mouse leave - check for auto-scroll when leaving canvas during drag
-    canvas.addEventListener('mouseleave', (e: MouseEvent) => {
+    this.listen(canvas, 'mouseleave', (e: MouseEvent) => {
       if (this.isSelecting) {
         // Determine scroll direction based on where mouse left
         const rect = canvas.getBoundingClientRect();
@@ -503,7 +534,7 @@ export class SelectionManager {
     });
 
     // Mouse enter - stop auto-scroll when mouse returns to canvas
-    canvas.addEventListener('mouseenter', () => {
+    this.listen(canvas, 'mouseenter', () => {
       if (this.isSelecting) {
         this.stopAutoScroll();
       }
@@ -566,7 +597,7 @@ export class SelectionManager {
     document.addEventListener('mousemove', this.boundDocumentMouseMoveHandler);
 
     // Track mousedown on document to know if a click started inside the canvas
-    document.addEventListener('mousedown', (e: MouseEvent) => {
+    this.listen(document, 'mousedown', (e: MouseEvent) => {
       this.mouseDownTarget = e.target;
     });
 
@@ -596,7 +627,7 @@ export class SelectionManager {
 
     // Handle click events for double-click (word) and triple-click (line) selection
     // Use event.detail which browsers set to click count (1, 2, 3, etc.)
-    canvas.addEventListener('click', (e: MouseEvent) => {
+    this.listen(canvas, 'click', (e: MouseEvent) => {
       // event.detail: 1 = single, 2 = double, 3 = triple click
       if (e.detail === 2) {
         // Double-click - select word
@@ -662,6 +693,9 @@ export class SelectionManager {
     // Right-click (context menu) - position textarea to show browser's native menu
     // This allows Copy/Paste options to appear in the context menu
     this.boundContextMenuHandler = (e: MouseEvent) => {
+      // Finish any previous menu's restore first so it cannot hide this one
+      this.cancelContextMenuReset();
+
       // Position textarea at mouse cursor
       const canvas = this.renderer.getCanvas();
       const rect = canvas.getBoundingClientRect();
@@ -693,7 +727,8 @@ export class SelectionManager {
 
       // After a short delay, restore the textarea to its hidden state
       // This allows the context menu to appear first
-      setTimeout(() => {
+      this.contextMenuTimeout = setTimeout(() => {
+        this.contextMenuTimeout = null;
         // Listen for when the context menu closes (user clicks away or selects an option)
         const resetTextarea = () => {
           this.textarea.style.pointerEvents = 'none';
@@ -708,7 +743,9 @@ export class SelectionManager {
           document.removeEventListener('click', resetTextarea);
           document.removeEventListener('contextmenu', resetTextarea);
           this.textarea.removeEventListener('blur', resetTextarea);
+          this.contextMenuReset = null;
         };
+        this.contextMenuReset = resetTextarea;
 
         // Reset on any of these events (menu closed)
         document.addEventListener('click', resetTextarea, { once: true });

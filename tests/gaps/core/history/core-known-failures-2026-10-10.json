@@ -1,0 +1,991 @@
+[
+  {
+    "id": "api.buffer-get-chars-grapheme",
+    "finding": "WEB-13",
+    "reason": "BufferCell.getChars returns only the first codepoint of a grapheme",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "chars",
+      "expected": "e\u0301",
+      "actual": "e"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/buffer.ts BufferCell.getChars returns the first codepoint only"
+    }
+  },
+  {
+    "id": "api.buffer-normal-while-alternate",
+    "finding": "WEB-13",
+    "reason": "buffer.normal reads whichever screen is active",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "normal-row0",
+      "expected": "MAIN",
+      "actual": "ALT"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/buffer.ts Buffer reads the active screen for both buffer types"
+    }
+  },
+  {
+    "id": "api.buffer-translate-keeps-blank-cells",
+    "finding": "WEB-13",
+    "reason": "BufferLine.translateToString concatenates getChars(), which is empty for blank cells, so interior blanks disappear (xterm.js renders them as spaces)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "text",
+      "expected": "a   b",
+      "actual": "ab"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/buffer.ts translateToString concatenates getChars() of blank cells"
+    }
+  },
+  {
+    "id": "api.select-all-includes-history",
+    "finding": "WEB-08",
+    "reason": "selectAll uses viewport-relative rows starting at history row 0, so it selects only the first screenful of history",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "first-last",
+      "expected": ["line0", "line12"],
+      "actual": ["line0", "line3"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/selection-manager.ts selectAll uses viewport rows from history row 0"
+    }
+  },
+  {
+    "id": "api.select-soft-wrapped-line",
+    "finding": "WEB-08",
+    "reason": "Selection text always joins rows with a newline, even across soft wraps",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "selection",
+      "expected": "AAAAAAAAAAAAAAAAAAAAAAAAA",
+      "actual": "AAAAAAAAAAAAAAAAAAAA\nAAAAA"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/selection-manager.ts getSelection joins every row with a newline"
+    }
+  },
+  {
+    "id": "api.select-wide-characters",
+    "finding": "WEB-08",
+    "reason": "Selection text appends a space for each wide-character spacer cell",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "selection",
+      "expected": "\u4e2d\u6587abc",
+      "actual": "\u4e2d \u6587 abc"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/selection-manager.ts getSelection emits a space for wide-char spacers"
+    }
+  },
+  {
+    "id": "encoder.unshifted-codepoint-honoured",
+    "finding": "IN-03",
+    "reason": "KeyEncoder.encode ignores KeyEvent.unshiftedCodepoint, so the core encoder cannot produce Kitty CSI-u for Ctrl+letter",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "encoded",
+      "expected": "1b5b39393b3575",
+      "actual": ""
+    }
+  },
+  {
+    "id": "event.bell-not-from-osc-terminator",
+    "finding": "WEB-03",
+    "reason": "onBell is a heuristic that fires when a written chunk contains 0x07, including OSC terminators",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "bells",
+      "expected": 0,
+      "actual": 1
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts writeInternal BEL heuristic"
+    }
+  },
+  {
+    "id": "event.bell-not-from-osc8-terminators",
+    "finding": "WEB-03",
+    "reason": "onBell heuristic fires on BEL-terminated OSC 8 hyperlinks",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "bells",
+      "expected": 0,
+      "actual": 1
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts writeInternal BEL heuristic"
+    }
+  },
+  {
+    "id": "event.title-split-across-writes",
+    "finding": "IN-11",
+    "reason": "Title regex runs per write, so an OSC title split across writes is never reported",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "titles",
+      "expected": ["split"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts checkForTitleChange regex per write"
+    }
+  },
+  {
+    "id": "event.title-uint8array",
+    "finding": "WEB-03",
+    "reason": "Title detection is a regex over string writes only; titles in Uint8Array writes are never reported",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "titles",
+      "expected": ["bytes"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts checkForTitleChange runs on string writes only"
+    }
+  },
+  {
+    "id": "focus.blur-report",
+    "finding": "IN-07",
+    "reason": "Nothing emits focus reports (ESC[O) on blur while mode 1004 is set",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b4f"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts / lib/input-handler.ts emit no focus reports"
+    }
+  },
+  {
+    "id": "focus.focus-report",
+    "finding": "IN-07",
+    "reason": "Nothing emits focus reports (ESC[I) on focus while mode 1004 is set",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b49"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts / lib/input-handler.ts emit no focus reports"
+    }
+  },
+  {
+    "id": "focus.report-on-enable",
+    "finding": "IN-07",
+    "reason": "Native termio reports the current focus state when 1004 is enabled; ghostty-web has no host hook",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b49"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: no host hook reports focus when mode 1004 is enabled"
+    }
+  },
+  {
+    "id": "frag.string-surrogate-pair-split",
+    "finding": "IN-10",
+    "reason": "GhosttyTerminal.write encodes each string chunk independently, so a surrogate pair split across write(string) calls becomes two U+FFFD (xterm.js keeps the pending high surrogate)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "cells",
+      "expected": [
+        [128512, 2],
+        [0, 0],
+        [90, 1]
+      ],
+      "actual": [
+        [65533, 1],
+        [65533, 1],
+        [90, 1]
+      ]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/ghostty.ts facade write() encodes each string chunk independently"
+    }
+  },
+  {
+    "id": "grapheme.clustering-survives-ris",
+    "finding": "WEB-15",
+    "reason": "Patch sets grapheme clustering (2027) after init instead of as a default mode, so RIS turns it off",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "cursor-x",
+      "expected": 3,
+      "actual": 5
+    }
+  },
+  {
+    "id": "key-encoding.pause",
+    "finding": "WEB-07",
+    "reason": "Legacy ABI: public Key.PAUSE (149) is the legacy C value of SCROLL_LOCK, so Scroll Lock is reported, because lib/types.ts omits GHOSTTY_KEY_FN",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "encoded",
+      "expected": "1b5b353733363275",
+      "actual": "1b5b353733353975"
+    }
+  },
+  {
+    "id": "key-encoding.print-screen",
+    "finding": "WEB-07",
+    "reason": "Legacy ABI: public Key.PRINT_SCREEN (147) is the legacy C value of FN_LOCK, which Kitty encoding does not report, because lib/types.ts omits GHOSTTY_KEY_FN",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "encoded",
+      "expected": "1b5b353733363175",
+      "actual": ""
+    }
+  },
+  {
+    "id": "key-encoding.scroll-lock",
+    "finding": "WEB-07",
+    "reason": "Legacy ABI: public Key.SCROLL_LOCK (148) is the legacy C value of PRINT_SCREEN, so Print Screen is reported, because lib/types.ts omits GHOSTTY_KEY_FN",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "encoded",
+      "expected": "1b5b353733353975",
+      "actual": "1b5b353733363175"
+    }
+  },
+  {
+    "id": "key.alt-b",
+    "finding": "IN-01",
+    "reason": "InputHandler syncs only DECCKM into the encoder; mode 1036 (Alt sends ESC, default on) is ignored, so Alt+letter loses its ESC prefix",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b62"],
+      "actual": ["62"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts printable path ignores mode 1036 (Alt sends ESC)"
+    }
+  },
+  {
+    "id": "key.alt-period",
+    "finding": "IN-01",
+    "reason": "Alt+punctuation takes the printable path without the ESC prefix (mode 1036 ignored)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b2e"],
+      "actual": ["2e"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts printable path ignores mode 1036 (Alt sends ESC)"
+    }
+  },
+  {
+    "id": "key.ctrl-alt-c",
+    "finding": "IN-01",
+    "reason": "isPrintableCharacter treats every Ctrl+Alt chord as AltGr and sends event.key; native legacy encoding is ESC ^C",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b03"],
+      "actual": ["63"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts isPrintableCharacter treats Ctrl+Alt as AltGr"
+    }
+  },
+  {
+    "id": "key.home-decckm",
+    "finding": "WEB-07",
+    "reason": "Hard-coded table ignores application cursor mode (DECCKM) for Home",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b4f48"],
+      "actual": ["1b5b48"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts hard-coded key table ignores DECCKM"
+    }
+  },
+  {
+    "id": "key.kitty1-ctrl-c",
+    "finding": "IN-03",
+    "reason": "Kitty flags are never synced into the encoder; Ctrl+C stays legacy 0x03",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b39393b3575"],
+      "actual": ["03"]
+    }
+  },
+  {
+    "id": "key.kitty1-escape",
+    "finding": "IN-03",
+    "reason": "Kitty flags pushed by the application are never synced into the encoder (no flags getter in the patch)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b323775"],
+      "actual": ["1b"]
+    }
+  },
+  {
+    "id": "key.kitty1-shift-enter",
+    "finding": "IN-03",
+    "reason": "Kitty flags are never synced; Shift+Enter goes through the hard-coded table as CR",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b31333b3275"],
+      "actual": ["0d"]
+    }
+  },
+  {
+    "id": "key.kitty3-release",
+    "finding": "IN-03",
+    "reason": "No keyup listener and action is always PRESS, so Kitty release events are never sent",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["61", "1b5b39373b313a3375"],
+      "actual": ["61"]
+    }
+  },
+  {
+    "id": "key.shift-f5",
+    "finding": "WEB-07",
+    "reason": "Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on function keys",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b31353b327e"],
+      "actual": ["1b5b31357e"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts hard-coded key table drops Shift"
+    }
+  },
+  {
+    "id": "key.shift-home",
+    "finding": "WEB-07",
+    "reason": "Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on Home",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b313b3248"],
+      "actual": ["1b5b48"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts hard-coded key table drops Shift"
+    }
+  },
+  {
+    "id": "legacy-key-abi.fn-lock-onward",
+    "finding": "WEB-07",
+    "reason": "Legacy ABI only: lib/types.ts omits GHOSTTY_KEY_FN, so FN_LOCK and every later public Key value is one below the pinned legacy header, and the legacy bridge passes the numbers through unchanged",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "values",
+      "expected": [147, 148, 175],
+      "actual": [146, 147, 174]
+    }
+  },
+  {
+    "id": "mouse.any-motion-no-button",
+    "finding": "IN-08",
+    "reason": "No-button motion is encoded as 32 instead of 35 (32 + 3 for no button)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3c33353b31303b334d"],
+      "actual": ["1b5b3c33323b31303b334d"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts handleMouseMove encodes no-button motion as 32"
+    }
+  },
+  {
+    "id": "mouse.mode-reset-turns-reporting-off",
+    "finding": "IN-09",
+    "reason": "Patch handler never maintains flags.mouse_event; ghostty-web ORs mode bits, so resetting 1002 leaves 1000 reporting",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": [],
+      "actual": ["1b5b3c303b343b324d"]
+    }
+  },
+  {
+    "id": "mouse.motion-deduplicated-per-cell",
+    "finding": "WEB-06",
+    "reason": "Motion is reported for every mousemove instead of once per cell change",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3c303b343b324d", "1b5b3c33323b353b324d"],
+      "actual": ["1b5b3c303b343b324d", "1b5b3c33323b353b324d", "1b5b3c33323b353b324d"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts reports every mousemove"
+    }
+  },
+  {
+    "id": "mouse.sgr-alt-press",
+    "finding": "IN-08",
+    "reason": "getMouseModifiers never adds the Alt bit (8)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3c383b343b324d"],
+      "actual": ["1b5b3c303b343b324d"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts getMouseModifiers has no Alt bit"
+    }
+  },
+  {
+    "id": "mouse.sgr-meta-press",
+    "finding": "IN-08",
+    "reason": "getMouseModifiers maps Meta/Super to bit 8, which belongs to Alt",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3c303b343b324d"],
+      "actual": ["1b5b3c383b343b324d"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts getMouseModifiers maps Meta to bit 8"
+    }
+  },
+  {
+    "id": "mouse.shift-bypasses-reporting",
+    "finding": "WEB-06",
+    "reason": "No Shift override: Shift+click is reported to the application instead of being left for local selection",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": [],
+      "actual": ["1b5b3c343b343b324d"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts reports Shift+click (no Shift bypass)"
+    }
+  },
+  {
+    "id": "mouse.wheel-alt-screen-tracking",
+    "finding": "WEB-06",
+    "reason": "On the alternate screen the wheel always sends arrow keys, ignoring active mouse reporting",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3c36353b343b324d"],
+      "actual": ["1b5b42", "1b5b42", "1b5b42"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts handleWheel sends arrows on the alternate screen"
+    }
+  },
+  {
+    "id": "mouse.wheel-reported-when-tracking",
+    "finding": "WEB-06",
+    "reason": "Terminal.handleWheel (capture phase) swallows the wheel before InputHandler can report it",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3c36343b343b324d"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts capture-phase handleWheel swallows wheel reports"
+    }
+  },
+  {
+    "id": "mouse.x10-beyond-223-dropped",
+    "finding": "IN-08",
+    "reason": "X10 coordinates are clamped to 255 instead of the report being dropped beyond 223",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": [],
+      "actual": ["1b5b4d20c3bf25"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts encodeMouseX10 clamps to 255 instead of dropping"
+    }
+  },
+  {
+    "id": "mouse.x10-col100-raw-byte",
+    "finding": "IN-10",
+    "reason": "X10 coordinates are built as UTF-16 code units and emitted through string onData, so byte 0x84 becomes UTF-8 c2 84",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b4d208425"],
+      "actual": ["1b5b4d20c28425"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts encodeMouseX10 emits UTF-16 through string onData"
+    }
+  },
+  {
+    "id": "mouse.x10-mode9-press",
+    "finding": "IN-08",
+    "reason": "hasMouseTracking (patch) ignores X10 mode 9, so no report is sent",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b4d202323"],
+      "actual": []
+    }
+  },
+  {
+    "id": "paste.bracketed-end-marker-neutralised",
+    "finding": "IN-12",
+    "reason": "An embedded ESC[201~ terminates bracketed paste early (ESC is not stripped)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["1b5b3230307e78205b3230317e3b20746f756368202f746d702f70776e65640a1b5b3230317e"],
+      "actual": ["1b5b3230307e781b5b3230317e3b20746f756368202f746d702f70776e65640a1b5b3230317e"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts / lib/terminal.ts paste sends text verbatim"
+    }
+  },
+  {
+    "id": "paste.unbracketed-control-bytes",
+    "finding": "IN-12",
+    "reason": "Paste does not replace control bytes with spaces (current paste.encode strip list)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["61206220630d64"],
+      "actual": ["6103621b630a64"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts / lib/terminal.ts paste sends text verbatim"
+    }
+  },
+  {
+    "id": "paste.unbracketed-newline-to-cr",
+    "finding": "WEB-12",
+    "reason": "Unbracketed paste is sent verbatim; native maps LF to CR",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "output.bytes",
+      "expected": ["6563686f20610d6563686f2062"],
+      "actual": ["6563686f20610a6563686f2062"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/input-handler.ts / lib/terminal.ts paste sends text verbatim"
+    }
+  },
+  {
+    "id": "reply.decrqm-2004-reset",
+    "finding": "WEB-03",
+    "reason": "Patch ResponseHandler discards request_mode (DECRQM)",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "replies",
+      "expected": ["1b5b3f323030343b322479"],
+      "actual": []
+    }
+  },
+  {
+    "id": "reply.decrqm-2004-set",
+    "finding": "WEB-03",
+    "reason": "Patch ResponseHandler discards request_mode (DECRQM)",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "replies",
+      "expected": ["1b5b3f323030343b312479"],
+      "actual": []
+    }
+  },
+  {
+    "id": "reply.decrqm-2026",
+    "finding": "IN-11",
+    "reason": "Patch ResponseHandler discards request_mode, so mode 2026 probing gets no DECRPM",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "replies",
+      "expected": ["1b5b3f323032363b322479"],
+      "actual": []
+    }
+  },
+  {
+    "id": "reply.disable-stdin-suppresses-replies",
+    "finding": "IN-11",
+    "reason": "disableStdin filters only InputHandler; terminal replies still fire onData (xterm.js drops them)",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "replies",
+      "expected": [],
+      "actual": ["1b5b313b3152"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "core matrix 2026-10-10 (legacy 0789394, candidate 8b218c0): identical signature on both engines; cause in shared JS layer: lib/terminal.ts processTerminalResponses ignores disableStdin"
+    }
+  },
+  {
+    "id": "reply.kitty-keyboard-query",
+    "finding": "WEB-03",
+    "reason": "Patch ResponseHandler discards kitty_keyboard_query",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "replies",
+      "expected": ["1b5b3f3075"],
+      "actual": []
+    }
+  },
+  {
+    "id": "reply.text-area-size-chars",
+    "finding": "WEB-03",
+    "reason": "Patch ResponseHandler discards size_report (CSI 18 t)",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "replies",
+      "expected": ["1b5b383b343b323074"],
+      "actual": []
+    }
+  },
+  {
+    "id": "reply.xtversion-is-dcs",
+    "finding": "WEB-03",
+    "reason": "Patch ResponseHandler discards xtversion",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "dcs-prefix",
+      "expected": true,
+      "actual": false
+    }
+  },
+  {
+    "id": "resize.narrow-drops-orphan-wide-head",
+    "finding": "SW-01",
+    "reason": "Pinned core lacks upstream e6db5b633; narrowing leaves a wide head without its tail in the last column",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "row0-cells",
+      "expected": [
+        [97, 1],
+        [0, 1]
+      ],
+      "actual": [
+        [97, 1],
+        [19968, 2]
+      ]
+    }
+  },
+  {
+    "id": "scrollback.limit-is-lines",
+    "finding": "WEB-02",
+    "reason": "scrollback is interpreted as bytes, so a 100-line request retains whole pages of history (977 lines at 80x24 after 1000 lines)",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "retained-lines",
+      "expected": 100,
+      "actual": 977
+    }
+  },
+  {
+    "id": "scrollback.zero-means-none",
+    "finding": "WEB-02",
+    "reason": "scrollback is passed to the core as bytes and 0 is mapped to unlimited",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "scrollback-length",
+      "expected": 0,
+      "actual": 77
+    }
+  }
+]

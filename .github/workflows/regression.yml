@@ -1,0 +1,190 @@
+name: regression
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+# Required CI must never be repurposed into the opt-in gap runner by an env override.
+env:
+  GHOSTTY_REQUIRED_CI: '1'
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    name: Build ${{ matrix.backend }} regression engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: libghostty-vt
+            zig: 0.16.0
+            artifact: ghostty-vt.wasm
+          - backend: legacy
+            zig: 0.15.2
+            artifact: ghostty-vt-legacy.wasm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.15
+      - uses: ./.github/actions/setup-zig
+        with:
+          version: ${{ matrix.zig }}
+      - name: Build the recorded engine
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: ./scripts/build-wasm.sh "$BACKEND" --work-dir "$RUNNER_TEMP/ghostty-build"
+      - name: Record artifact identity
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          cp "$RUNNER_TEMP/ghostty-build/meta/$BACKEND.build-info.json" build-info.json
+          printf '%s\n' 'Checkout submodule (actual engine pin is in build-info.json):' > engine-provenance.txt
+          git ls-tree HEAD ghostty >> engine-provenance.txt
+          sha256sum ghostty-build.json "$ARTIFACT" >> engine-provenance.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regression-wasm-${{ matrix.backend }}
+          path: |
+            ${{ matrix.artifact }}
+            ghostty-build.json
+            build-info.json
+            engine-provenance.txt
+          retention-days: 7
+
+  core:
+    name: Core regressions (${{ matrix.engine }})
+    needs: wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: web-candidate
+            backend: libghostty-vt
+            artifact: ghostty-vt.wasm
+          - engine: web-pinned
+            backend: legacy
+            artifact: ghostty-vt-legacy.wasm
+    env:
+      GHOSTTY_REGRESSION_ENGINE: ${{ matrix.engine }}
+      GHOSTTY_REGRESSION_WASM: ${{ matrix.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.15
+      - uses: actions/download-artifact@v4
+        with:
+          name: regression-wasm-${{ matrix.backend }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - name: Run core regressions and identity/negative controls
+        run: |
+          mkdir -p test-results
+          set -o pipefail
+          bun run test:regression 2>&1 | tee test-results/core.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-core-${{ matrix.engine }}
+          path: |
+            test-results/
+            engine-provenance.txt
+          retention-days: 14
+
+  reference:
+    name: Independent current-upstream oracle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.15
+      - uses: ./.github/actions/setup-zig
+        with:
+          version: 0.16.0
+      - run: bun install --frozen-lockfile
+      - name: Build the manifest-pinned upstream revision independently
+        run: ./scripts/build-reference-wasm.sh "$RUNNER_TEMP/ghostty-reference"
+      - name: Run shared fixtures and independent protocol oracles
+        run: |
+          source "$RUNNER_TEMP/ghostty-reference/out/reference.env"
+          export GHOSTTY_REFERENCE_WASM GHOSTTY_REFERENCE_COMMIT GHOSTTY_REFERENCE_WASM_SHA256
+          mkdir -p test-results
+          set -o pipefail
+          bun run test:regression:reference 2>&1 | tee test-results/reference.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-reference-results
+          path: |
+            test-results/
+            ${{ runner.temp }}/ghostty-reference/out/build-info.json
+            ${{ runner.temp }}/ghostty-reference/logs/
+          retention-days: 14
+
+  browser:
+    name: Chromium visual and interaction regressions (${{ matrix.engine }})
+    needs: wasm
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+      options: --ipc=host
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: web-candidate
+            backend: libghostty-vt
+          - engine: web-pinned
+            backend: legacy
+    defaults:
+      run:
+        shell: bash
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      GHOSTTY_REGRESSION_ENGINE: ${{ matrix.engine }}
+    steps:
+      - uses: actions/checkout@v4
+      # setup-bun extracts a ZIP; the pinned Playwright image does not include unzip.
+      - name: Install Bun setup prerequisite
+        run: apt-get update -qq && apt-get install -y --no-install-recommends unzip
+      - uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.15
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: regression-wasm-${{ matrix.backend }}
+      - run: bun install --frozen-lockfile
+      - name: Run actual-browser tests (one run, no retries)
+        run: bun run test:regression:browser
+      - name: Verify published native package
+        if: matrix.engine == 'web-candidate'
+        env:
+          REGRESSION_ARTIFACT_DIR: ${{ github.workspace }}/test-results/package
+        run: |
+          set -o pipefail
+          bun run test:regression:package 2>&1 | tee test-results/package.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-browser-${{ matrix.engine }}
+          path: |
+            test-results/
+            playwright-report/
+            engine-provenance.txt
+          retention-days: 14

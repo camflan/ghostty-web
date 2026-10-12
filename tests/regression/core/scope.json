@@ -1,0 +1,1687 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "api.write-string-and-bytes",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.writeln",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.write-callback-after-parse",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.write-empty-string-is-noop",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.buffer-cursor",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.buffer-is-wrapped",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.buffer-active-type",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.buffer-translate-keeps-blank-cells",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-13 (js-layer, gap on both engines): BufferLine.translateToString concatenates getChars(), which is empty for blank cells, so interior blanks disappear (xterm.js renders them as spaces)"
+    },
+    {
+      "id": "api.buffer-normal-while-alternate",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-13 (js-layer, gap on both engines): buffer.normal reads whichever screen is active"
+    },
+    {
+      "id": "api.buffer-get-chars-grapheme",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-13 (js-layer, gap on both engines): BufferCell.getChars returns only the first codepoint of a grapheme"
+    },
+    {
+      "id": "api.select-basic",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.select-lines",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.selection-change-event",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.select-wide-characters",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 (js-layer, gap on both engines): Selection text appends a space for each wide-character spacer cell"
+    },
+    {
+      "id": "api.select-soft-wrapped-line",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 (js-layer, gap on both engines): Selection text always joins rows with a newline, even across soft wraps"
+    },
+    {
+      "id": "api.select-all-includes-history",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-08 (js-layer, gap on both engines): selectAll uses viewport-relative rows starting at history row 0, so it selects only the first screenful of history"
+    },
+    {
+      "id": "api.get-mode",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.mouse-tracking-mode",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "facade.native-capabilities-are-explicit",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.plain-a",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.shift-a",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.enter",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.backspace",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.tab",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.shift-tab",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.escape",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.ctrl-c",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.ctrl-a",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.arrow-up",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.arrow-up-decckm",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.ctrl-arrow-left",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.shift-arrow-up",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.home",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.delete",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.page-up",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.f1",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.f5",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.alt-b",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-01 (js-layer, gap on both engines): InputHandler syncs only DECCKM into the encoder; mode 1036 (Alt sends ESC, default on) is ignored, so Alt+letter loses its ESC prefix"
+    },
+    {
+      "id": "key.alt-period",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-01 (js-layer, gap on both engines): Alt+punctuation takes the printable path without the ESC prefix (mode 1036 ignored)"
+    },
+    {
+      "id": "key.ctrl-alt-c",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-01 (js-layer, gap on both engines): isPrintableCharacter treats every Ctrl+Alt chord as AltGr and sends event.key; native legacy encoding is ESC ^C"
+    },
+    {
+      "id": "key.shift-f5",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-07 (js-layer, gap on both engines): Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on function keys"
+    },
+    {
+      "id": "key.shift-home",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-07 (js-layer, gap on both engines): Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on Home"
+    },
+    {
+      "id": "key.home-decckm",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-07 (js-layer, gap on both engines): Hard-coded table ignores application cursor mode (DECCKM) for Home"
+    },
+    {
+      "id": "key.kitty-flags-readable-mode-free",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty1-escape",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-03 (js-layer, gap on legacy (web-pinned) only; native fixed it): Kitty flags pushed by the application are never synced into the encoder (no flags getter in the patch)"
+    },
+    {
+      "id": "key.kitty1-ctrl-c",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-03 (js-layer, gap on legacy (web-pinned) only; native fixed it): Kitty flags are never synced into the encoder; Ctrl+C stays legacy 0x03"
+    },
+    {
+      "id": "key.kitty1-shift-enter",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-03 (js-layer, gap on legacy (web-pinned) only; native fixed it): Kitty flags are never synced; Shift+Enter goes through the hard-coded table as CR"
+    },
+    {
+      "id": "key.kitty1-plain-text-stays-text",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty3-release",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-03 (js-layer, gap on legacy (web-pinned) only; native fixed it): No keyup listener and action is always PRESS, so Kitty release events are never sent"
+    },
+    {
+      "id": "key.kitty-host-shortcuts-suppress-release",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty-release-needs-forwarded-press",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty-pop-restores-controls",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty-disable-restores-controls",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty-ris-restores-controls",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty-reset-restores-controls",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key.kitty-alt-exit-restores-controls",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.alt-esc-prefix",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.shift-f5",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.shift-home",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.decckm-home",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.kitty1-escape",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.kitty1-shift-enter",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "encoder.unshifted-codepoint-honoured",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-03 (js-layer, gap on legacy (web-pinned) only; native fixed it): KeyEncoder.encode ignores KeyEvent.unshiftedCodepoint, so the core encoder cannot produce Kitty CSI-u for Ctrl+letter"
+    },
+    {
+      "id": "key-encoding.num-lock",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key-encoding.f13",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "key-encoding.print-screen",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-07 (js-layer, gap on legacy (web-pinned) only; native fixed it): Legacy ABI: public Key.PRINT_SCREEN (147) is the legacy C value of FN_LOCK, which Kitty encoding does not report, because lib/types.ts omits GHOSTTY_KEY_FN"
+    },
+    {
+      "id": "key-encoding.scroll-lock",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-07 (js-layer, gap on legacy (web-pinned) only; native fixed it): Legacy ABI: public Key.SCROLL_LOCK (148) is the legacy C value of PRINT_SCREEN, so Print Screen is reported, because lib/types.ts omits GHOSTTY_KEY_FN"
+    },
+    {
+      "id": "key-encoding.pause",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-07 (js-layer, gap on legacy (web-pinned) only; native fixed it): Legacy ABI: public Key.PAUSE (149) is the legacy C value of SCROLL_LOCK, so Scroll Lock is reported, because lib/types.ts omits GHOSTTY_KEY_FN"
+    },
+    {
+      "id": "legacy-key-abi.before-fn",
+      "required": ["web-pinned"],
+      "gaps": [],
+      "unsupported": ["web-candidate"],
+      "reason": "ABI-specific: exercises the legacy ABI only, so it is unsupported (not run, not passed) on web-candidate"
+    },
+    {
+      "id": "legacy-key-abi.fn-lock-onward",
+      "required": [],
+      "gaps": ["web-pinned"],
+      "unsupported": ["web-candidate"],
+      "reason": "WEB-07 (js-layer, gap on legacy (web-pinned) only; native fixed it): Legacy ABI only: lib/types.ts omits GHOSTTY_KEY_FN, so FN_LOCK and every later public Key value is one below the pinned legacy header, and the legacy bridge passes the numbers through unchanged; ABI-specific: exercises the legacy ABI only, so it is unsupported (not run, not passed) on web-candidate"
+    },
+    {
+      "id": "lifecycle.reset-clears-screen",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-homes-cursor",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-after-ascii",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.ris-after-combining",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-after-combining",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.dispose-then-create-after-grapheme",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.new-terminal-starts-blank",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.bystander-survives-trap",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.selection-follows-reset",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.dispose-twice",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.dispose-removes-listeners",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.shared-instance-memory-plateau",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reads-after-memory-growth",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.scroll-growth-no-stale-rows",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-in-place",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-while-scrolled-and-selected",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-scroll-event-sees-reset-state",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-leaves-alternate-screen",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-restores-default-modes",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-keeps-grapheme-clustering",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-keeps-theme",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-keeps-scrollback-limit",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-discards-partial-sequence",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.reset-emits-nothing",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.remount-same-container",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.failed-open-cleans-up",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.dispose-cancels-timers",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.dispose-with-failing-addon",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "lifecycle.api-after-dispose",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.no-tracking-no-report",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.sgr-left-press-release",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.sgr-right-press",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.sgr-ctrl-press",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.sgr-alt-press",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-08 (js-layer, gap on both engines): getMouseModifiers never adds the Alt bit (8)"
+    },
+    {
+      "id": "mouse.sgr-meta-press",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-08 (js-layer, gap on both engines): getMouseModifiers maps Meta/Super to bit 8, which belongs to Alt"
+    },
+    {
+      "id": "mouse.shift-bypasses-reporting",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-06 (js-layer, gap on both engines): No Shift override: Shift+click is reported to the application instead of being left for local selection"
+    },
+    {
+      "id": "mouse.button-motion",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.button-motion-without-button-silent",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.motion-deduplicated-per-cell",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-06 (js-layer, gap on both engines): Motion is reported for every mousemove instead of once per cell change"
+    },
+    {
+      "id": "mouse.any-motion-no-button",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-08 (js-layer, gap on both engines): No-button motion is encoded as 32 instead of 35 (32 + 3 for no button)"
+    },
+    {
+      "id": "mouse.x10-normal-small-coords",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.x10-col100-raw-byte",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-10 (js-layer, gap on both engines): X10 coordinates are built as UTF-16 code units and emitted through string onData, so byte 0x84 becomes UTF-8 c2 84"
+    },
+    {
+      "id": "mouse.x10-beyond-223-dropped",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-08 (js-layer, gap on both engines): X10 coordinates are clamped to 255 instead of the report being dropped beyond 223"
+    },
+    {
+      "id": "mouse.x10-mode9-press",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-08 (backend, gap on legacy (web-pinned) only; native fixed it): hasMouseTracking (patch) ignores X10 mode 9, so no report is sent"
+    },
+    {
+      "id": "mouse.mode-reset-turns-reporting-off",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-09 (backend, gap on legacy (web-pinned) only; native fixed it): Patch handler never maintains flags.mouse_event; ghostty-web ORs mode bits, so resetting 1002 leaves 1000 reporting"
+    },
+    {
+      "id": "mouse.wheel-reported-when-tracking",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-06 (js-layer, gap on both engines): Terminal.handleWheel (capture phase) swallows the wheel before InputHandler can report it"
+    },
+    {
+      "id": "mouse.wheel-alt-screen-tracking",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-06 (js-layer, gap on both engines): On the alternate screen the wheel always sends arrow keys, ignoring active mouse reporting"
+    },
+    {
+      "id": "paste.plain-text",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "paste.bracketed-plain",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "paste.bracketed-keeps-newline",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "paste.disable-stdin-suppresses",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "paste.unbracketed-newline-to-cr",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-12 (js-layer, gap on both engines): Unbracketed paste is sent verbatim; native maps LF to CR"
+    },
+    {
+      "id": "paste.unbracketed-control-bytes",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-12 (js-layer, gap on both engines): Paste does not replace control bytes with spaces (current paste.encode strip list)"
+    },
+    {
+      "id": "paste.bracketed-end-marker-neutralised",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-12 (js-layer, gap on both engines): An embedded ESC[201~ terminates bracketed paste early (ESC is not stripped)"
+    },
+    {
+      "id": "focus.mode-readable",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "focus.no-report-without-mode",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "focus.blur-report",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-07 (js-layer, gap on both engines): Nothing emits focus reports (ESC[O) on blur while mode 1004 is set"
+    },
+    {
+      "id": "focus.focus-report",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-07 (js-layer, gap on both engines): Nothing emits focus reports (ESC[I) on focus while mode 1004 is set"
+    },
+    {
+      "id": "focus.report-on-enable",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-07 (js-layer, gap on both engines): Native termio reports the current focus state when 1004 is enabled; ghostty-web has no host hook"
+    },
+    {
+      "id": "reply.none-for-plain-text",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "reply.cpr-home",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "reply.cpr-after-move",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "reply.dsr-status",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "reply.da1",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "reply.order-preserved",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "reply.decrqm-2004-reset",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-03 (backend, gap on legacy (web-pinned) only; native fixed it): Patch ResponseHandler discards request_mode (DECRQM)"
+    },
+    {
+      "id": "reply.decrqm-2004-set",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-03 (backend, gap on legacy (web-pinned) only; native fixed it): Patch ResponseHandler discards request_mode (DECRQM)"
+    },
+    {
+      "id": "reply.decrqm-2026",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "IN-11 (backend, gap on legacy (web-pinned) only; native fixed it): Patch ResponseHandler discards request_mode, so mode 2026 probing gets no DECRPM"
+    },
+    {
+      "id": "reply.kitty-keyboard-query",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-03 (backend, gap on legacy (web-pinned) only; native fixed it): Patch ResponseHandler discards kitty_keyboard_query"
+    },
+    {
+      "id": "reply.xtversion-is-dcs",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-03 (backend, gap on legacy (web-pinned) only; native fixed it): Patch ResponseHandler discards xtversion"
+    },
+    {
+      "id": "reply.text-area-size-chars",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-03 (backend, gap on legacy (web-pinned) only; native fixed it): Patch ResponseHandler discards size_report (CSI 18 t)"
+    },
+    {
+      "id": "reply.disable-stdin-suppresses-replies",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-11 (js-layer, gap on both engines): disableStdin filters only InputHandler; terminal replies still fire onData (xterm.js drops them)"
+    },
+    {
+      "id": "event.bell",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "event.bell-not-from-osc-terminator",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-03 (js-layer, gap on both engines): onBell is a heuristic that fires when a written chunk contains 0x07, including OSC terminators"
+    },
+    {
+      "id": "event.bell-not-from-osc8-terminators",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-03 (js-layer, gap on both engines): onBell heuristic fires on BEL-terminated OSC 8 hyperlinks"
+    },
+    {
+      "id": "event.title-string",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "event.title-st-terminator",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "event.title-uint8array",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "WEB-03 (js-layer, gap on both engines): Title detection is a regex over string writes only; titles in Uint8Array writes are never reported"
+    },
+    {
+      "id": "event.title-split-across-writes",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-11 (js-layer, gap on both engines): Title regex runs per write, so an OSC title split across writes is never reported"
+    },
+    {
+      "id": "event.input-was-user-input",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "frag.utf8-4byte-split",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "frag.utf8-every-offset",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "frag.csi-split-mid-parameters",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "frag.string-surrogate-pair-split",
+      "required": [],
+      "gaps": ["web-pinned", "web-candidate"],
+      "unsupported": [],
+      "reason": "IN-10 (js-layer, gap on both engines): GhosttyTerminal.write encodes each string chunk independently, so a surrogate pair split across write(string) calls becomes two U+FFFD (xterm.js keeps the pending high surrogate)"
+    },
+    {
+      "id": "wide.cjk-occupies-two-cells",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "wide.wraps-at-right-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "wide.print-over-spacer-tail",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "grapheme.combining-mark-one-cell",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "grapheme.zwj-family-one-wide-cell",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "grapheme.mode-2027-default-on",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "grapheme.clustering-survives-ris",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-15 (backend, gap on legacy (web-pinned) only; native fixed it): Patch sets grapheme clustering (2027) after init instead of as a default mode, so RIS turns it off"
+    },
+    {
+      "id": "resize.deccolm-keeps-host-grid-renderable",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "resize.reflow-shrink",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "resize.reflow-grow-joins-soft-wrap",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "resize.hard-newlines-not-joined",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "resize.on-resize-event",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "resize.narrow-drops-orphan-wide-head",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "SW-01 (backend, gap on legacy (web-pinned) only; native fixed it): Pinned core lacks upstream e6db5b633; narrowing leaves a wide head without its tail in the last column"
+    },
+    {
+      "id": "scrollback.buffer-order",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scrollback.zero-means-none",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "WEB-02 (backend, gap on legacy (web-pinned) only; native fixed it): scrollback is passed to the core as bytes and 0 is mapped to unlimited"
+    },
+    {
+      "id": "scrollback.limit-is-lines",
+      "required": [],
+      "gaps": ["web-pinned"],
+      "unsupported": ["web-candidate"],
+      "reason": "WEB-02 (backend, gap on legacy (web-pinned) only; native fixed it): scrollback is interpreted as bytes, so a 100-line request retains whole pages of history (977 lines at 80x24 after 1000 lines); ABI-specific: exercises the legacy ABI only, so it is unsupported (not run, not passed) on web-candidate"
+    },
+    {
+      "id": "scrollback.native-retention-matches-upstream",
+      "required": ["web-candidate"],
+      "gaps": [],
+      "unsupported": ["web-pinned"],
+      "reason": "ABI-specific: exercises the libghostty-vt ABI only, so it is unsupported (not run, not passed) on web-pinned"
+    },
+    {
+      "id": "vt.print.basic",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.print.wraparound",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.print.wrap-then-char",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.print.pending-wrap-cr",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.print.autowrap-off",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.print.unicode-single-width",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.crlf",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.lf-keeps-column",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.cr-overwrite",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.backspace",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.backspace-at-left-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.nul-bel-ignored",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.control.scroll-on-lf-at-bottom",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.tab.default-stops",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.tab.back",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.tab.clear-all-and-set",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.tab.no-stops-goes-to-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.cursor.cup",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.cursor.cup-clamped",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.cursor.relative-moves",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.cursor.cha-vpa",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.cursor.cnl-cpl",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.cursor.decsc-decrc",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.el-right",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.el-left",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.el-all",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.ed-below",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.ed-above",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.ed-all",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.erase.ech",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.ich",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.ich-pushes-off-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.dch",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.irm",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.il",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.dl",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.edit.rep",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.scroll.su",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.scroll.sd",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.scroll.decstbm-region",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.scroll.ri-at-top",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.scroll.ind-nel",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.mode.origin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.esc.decaln",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.charset.dec-special-graphics",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.screen.alt-enter",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.screen.alt-exit",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.sgr.does-not-print",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.osc.does-not-print",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt.csi.unknown-private-mode-ignored",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.print.basic",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.print.wraparound",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.print.wrap-then-char",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.print.pending-wrap-cr",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.print.autowrap-off",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.print.unicode-single-width",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.crlf",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.lf-keeps-column",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.cr-overwrite",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.backspace",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.backspace-at-left-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.nul-bel-ignored",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.control.scroll-on-lf-at-bottom",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.tab.default-stops",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.tab.back",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.tab.clear-all-and-set",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.tab.no-stops-goes-to-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.cursor.cup",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.cursor.cup-clamped",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.cursor.relative-moves",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.cursor.cha-vpa",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.cursor.cnl-cpl",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.cursor.decsc-decrc",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.el-right",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.el-left",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.el-all",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.ed-below",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.ed-above",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.ed-all",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.erase.ech",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.ich",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.ich-pushes-off-margin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.dch",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.irm",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.il",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.dl",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.edit.rep",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.scroll.su",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.scroll.sd",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.scroll.decstbm-region",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.scroll.ri-at-top",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.scroll.ind-nel",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.mode.origin",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.esc.decaln",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.charset.dec-special-graphics",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.screen.alt-enter",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.screen.alt-exit",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.sgr.does-not-print",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.osc.does-not-print",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "vt-split.csi.unknown-private-mode-ignored",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    }
+  ]
+}

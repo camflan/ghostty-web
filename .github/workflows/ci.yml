@@ -6,7 +6,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  GHOSTTY_REQUIRED_CI: '1'
+
 jobs:
+  regression:
+    name: Native/legacy migration regression gates
+    uses: ./.github/workflows/regression.yml
+
   fmt:
     name: fmt
     runs-on: ubuntu-latest
@@ -15,7 +22,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v1
         with:
-          bun-version: latest
+          bun-version: 1.2.15
 
       - name: Install dependencies
         run: bun install
@@ -31,7 +38,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v1
         with:
-          bun-version: latest
+          bun-version: 1.2.15
 
       - name: Install dependencies
         run: bun install
@@ -47,7 +54,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v1
         with:
-          bun-version: latest
+          bun-version: 1.2.15
 
       - name: Install dependencies
         run: bun install
@@ -65,11 +72,11 @@ jobs:
 
       - uses: oven-sh/setup-bun@v1
         with:
-          bun-version: latest
+          bun-version: 1.2.15
 
       - uses: ./.github/actions/setup-zig
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Build WASM
         run: ./scripts/build-wasm.sh
@@ -90,21 +97,23 @@ jobs:
 
       - uses: oven-sh/setup-bun@v1
         with:
-          bun-version: latest
+          bun-version: 1.2.15
 
       - uses: ./.github/actions/setup-zig
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Build WASM
         run: ./scripts/build-wasm.sh
 
+      # The unpatched current API includes render/selection/formatter facilities:
+      # intentionally budget 1 MiB instead of the old custom shim's 512 KiB.
       - name: Check WASM size
         run: |
           SIZE=$(stat -c%s ghostty-vt.wasm)
           echo "WASM size: $SIZE bytes"
-          if [ "$SIZE" -gt 524288 ]; then
-            echo "❌ Error: WASM exceeds 512 KB limit"
+          if [ "$SIZE" -gt 1048576 ]; then
+            echo "❌ Error: native libghostty-vt WASM exceeds the reviewed 1 MiB limit"
             exit 1
           fi
 

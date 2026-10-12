@@ -17,8 +17,15 @@ import { CellFlags } from './types';
 
 // Interface for objects that can be rendered
 export interface IRenderable {
+  readonly backend?: 'legacy' | 'libghostty-vt';
   getLine(y: number): GhosttyCell[] | null;
-  getCursor(): { x: number; y: number; visible: boolean };
+  getCursor(): {
+    x: number;
+    y: number;
+    visible: boolean;
+    style?: 'block' | 'bar' | 'underline';
+    blinking?: boolean;
+  };
   getDimensions(): { cols: number; rows: number };
   isRowDirty(y: number): boolean;
   /** Returns true if a full redraw is needed (e.g., screen change) */
@@ -100,6 +107,7 @@ export class CanvasRenderer {
   private cursorBlink: boolean;
   private theme: Required<ITheme>;
   private devicePixelRatio: number;
+  private readonly followsWindowDevicePixelRatio: boolean;
   private metrics: FontMetrics;
   private palette: string[];
 
@@ -107,6 +115,8 @@ export class CanvasRenderer {
   private cursorVisible: boolean = true;
   private cursorBlinkInterval?: number;
   private lastCursorPosition: { x: number; y: number } = { x: 0, y: 0 };
+  private lastCursorVisible = true;
+  private lastNativeCursorStyle: 'block' | 'bar' | 'underline' = 'block';
 
   // Viewport tracking (for scrolling)
   private lastViewportY: number = 0;
@@ -152,6 +162,7 @@ export class CanvasRenderer {
     this.cursorStyle = options.cursorStyle ?? 'block';
     this.cursorBlink = options.cursorBlink ?? false;
     this.theme = { ...DEFAULT_THEME, ...options.theme };
+    this.followsWindowDevicePixelRatio = options.devicePixelRatio === undefined;
     this.devicePixelRatio = options.devicePixelRatio ?? window.devicePixelRatio ?? 1;
 
     // Build color palette (16 ANSI colors)
@@ -242,8 +253,10 @@ export class CanvasRenderer {
     this.canvas.style.height = `${cssHeight}px`;
 
     // Set actual canvas size (scaled for DPI)
-    this.canvas.width = cssWidth * this.devicePixelRatio;
-    this.canvas.height = cssHeight * this.devicePixelRatio;
+    // Canvas backing dimensions are integers. Use the same rounding in render()
+    // or a fractional DPR causes a resize (and erases the canvas) on every frame.
+    this.canvas.width = Math.floor(cssWidth * this.devicePixelRatio);
+    this.canvas.height = Math.floor(cssHeight * this.devicePixelRatio);
 
     // Scale context to match DPI (setting canvas.width/height resets the context)
     this.ctx.scale(this.devicePixelRatio, this.devicePixelRatio);
@@ -285,10 +298,18 @@ export class CanvasRenderer {
       forceAll = true;
     }
 
-    // Resize canvas if dimensions changed
+    // Follow zoom/display changes unless the caller explicitly fixed the DPR.
+    const dpr = this.followsWindowDevicePixelRatio
+      ? (window.devicePixelRatio ?? 1)
+      : this.devicePixelRatio;
+    const dprChanged = dpr !== this.devicePixelRatio;
+    this.devicePixelRatio = dpr;
+
+    // Match the integer backing size assigned by resize(), including odd grids.
     const needsResize =
-      this.canvas.width !== dims.cols * this.metrics.width * this.devicePixelRatio ||
-      this.canvas.height !== dims.rows * this.metrics.height * this.devicePixelRatio;
+      dprChanged ||
+      this.canvas.width !== Math.floor(dims.cols * this.metrics.width * dpr) ||
+      this.canvas.height !== Math.floor(dims.rows * this.metrics.height * dpr);
 
     if (needsResize) {
       this.resize(dims.cols, dims.rows);
@@ -302,8 +323,21 @@ export class CanvasRenderer {
     }
 
     // Check if cursor position changed or if blinking (need to redraw cursor line)
+    const nativeCursor = buffer.backend === 'libghostty-vt';
+    const effectiveCursorStyle = nativeCursor
+      ? (cursor.style ?? this.cursorStyle)
+      : this.cursorStyle;
+    if (nativeCursor && cursor.blinking !== undefined && cursor.blinking !== this.cursorBlink) {
+      this.setCursorBlink(cursor.blinking);
+    }
+    const cursorAppearanceChanged =
+      nativeCursor &&
+      (cursor.visible !== this.lastCursorVisible ||
+        effectiveCursorStyle !== this.lastNativeCursorStyle);
     const cursorMoved =
-      cursor.x !== this.lastCursorPosition.x || cursor.y !== this.lastCursorPosition.y;
+      cursor.x !== this.lastCursorPosition.x ||
+      cursor.y !== this.lastCursorPosition.y ||
+      cursorAppearanceChanged;
     if (cursorMoved || this.cursorBlink) {
       // Mark cursor lines as needing redraw
       if (!forceAll && !buffer.isRowDirty(cursor.y)) {
@@ -485,7 +519,7 @@ export class CanvasRenderer {
 
     // Render cursor (only if we're at the bottom, not scrolled)
     if (viewportY === 0 && cursor.visible && this.cursorVisible) {
-      this.renderCursor(cursor.x, cursor.y);
+      this.renderCursor(cursor.x, cursor.y, effectiveCursorStyle);
     }
 
     // Render scrollbar if scrolled or scrollback exists (with opacity for fade effect)
@@ -495,6 +529,8 @@ export class CanvasRenderer {
 
     // Update last cursor position
     this.lastCursorPosition = { x: cursor.x, y: cursor.y };
+    this.lastCursorVisible = cursor.visible;
+    this.lastNativeCursorStyle = effectiveCursorStyle;
 
     // ALWAYS clear dirty flags after rendering, regardless of forceAll.
     // This is critical - if we don't clear after a full redraw, the dirty
@@ -576,9 +612,13 @@ export class CanvasRenderer {
       bg_b = cell.fg_b;
     }
 
-    // Only draw cell background if it's different from the default (black)
-    // This lets the theme background (drawn earlier) show through for default cells
-    const isDefaultBg = bg_r === 0 && bg_g === 0 && bg_b === 0;
+    // The native API distinguishes an explicit black cell from a default.
+    // Legacy cells lack this metadata and retain their historical RGB sentinel.
+    // Inverse foreground is always a real background color on the native path.
+    const black = bg_r === 0 && bg_g === 0 && bg_b === 0;
+    const inverse = (cell.flags & CellFlags.INVERSE) !== 0;
+    const isDefaultBg =
+      cell.bg_default === undefined ? black : !inverse && cell.bg_default && black;
     if (!isDefaultBg) {
       this.ctx.fillStyle = this.rgbToCSS(bg_r, bg_g, bg_b);
       this.ctx.fillRect(cellX, cellY, cellWidth, this.metrics.height);
@@ -716,13 +756,17 @@ export class CanvasRenderer {
   /**
    * Render cursor
    */
-  private renderCursor(x: number, y: number): void {
+  private renderCursor(
+    x: number,
+    y: number,
+    style: 'block' | 'bar' | 'underline' = this.cursorStyle
+  ): void {
     const cursorX = x * this.metrics.width;
     const cursorY = y * this.metrics.height;
 
     this.ctx.fillStyle = this.theme.cursor;
 
-    switch (this.cursorStyle) {
+    switch (style) {
       case 'block':
         // Full cell block
         this.ctx.fillRect(cursorX, cursorY, this.metrics.width, this.metrics.height);

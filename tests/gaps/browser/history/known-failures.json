@@ -1,0 +1,337 @@
+[
+  {
+    "id": "color.bg-sgr40-is-theme-black",
+    "finding": "WEB-04",
+    "reason": "Theme colour #000000 becomes the 0 'unset' sentinel in the WASM config, so palette 0 falls back to Ghostty's default #1d1f21.",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "sgr40-bg",
+      "expected": "#000000",
+      "actual": "#1d1f21"
+    }
+  },
+  {
+    "id": "color.bg-256-index-16-is-black",
+    "finding": "WEB-04/RT-06",
+    "reason": "Renderer treats any resolved rgb(0,0,0) background as 'default' and skips painting it, so explicit index 16 shows the theme background.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "index16-bg",
+      "expected": "#000000",
+      "actual": "#202020"
+    }
+  },
+  {
+    "id": "color.bg-truecolor-black-is-black",
+    "finding": "WEB-04/RT-06",
+    "reason": "Renderer treats explicit SGR 48;2;0;0;0 as 'default' background and paints the theme background instead.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "rgb000-bg",
+      "expected": "#000000",
+      "actual": "#202020"
+    }
+  },
+  {
+    "id": "color.fg-theme-black-on-light-theme",
+    "finding": "WEB-04",
+    "reason": "Theme foreground #000000 becomes the 0 'unset' sentinel, so default text uses Ghostty's default #cccccc (near-invisible on a light theme).",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "theme-black-fg",
+      "expected": "#000000",
+      "actual": "#cccccc"
+    }
+  },
+  {
+    "id": "text.history-row-grapheme-matches-active-row",
+    "finding": "WEB-09/RT-12",
+    "reason": "When scrolled, the renderer looks up graphemes with the viewport row on the active screen, so the history cell draws active-row text ('L') instead of e+U+0301.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "history-cluster-cell",
+      "expected": [],
+      "actual": ["0:0"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "perf.forced-frame-decodes-viewport-once",
+    "finding": "WEB-01",
+    "reason": "getLine() re-decodes the whole viewport for every drawn row (12 rows + block cursor = 13 decodes per frame).",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "viewport-decodes-per-forced-frame",
+      "expected": 1,
+      "actual": 13
+    }
+  },
+  {
+    "id": "cursor.decscusr-steady-bar",
+    "finding": "RT-07",
+    "reason": "Pinned bridge reports no cursor style (getCursor().style is a hard-coded TODO); the renderer only uses the cursorStyle option, so DECSCUSR is ignored.",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "decscusr-6-shape",
+      "expected": "bar",
+      "actual": "block"
+    }
+  },
+  {
+    "id": "cursor.decscusr-steady-underline",
+    "finding": "RT-07",
+    "reason": "Same root cause as cursor.decscusr-steady-bar: DECSCUSR 4 never reaches the renderer.",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "decscusr-4-shape",
+      "expected": "underline",
+      "actual": "block"
+    }
+  },
+  {
+    "id": "cursor.dectcem-hide-erases-cursor",
+    "finding": "RT-07",
+    "reason": "Hiding the cursor does not dirty its row; incremental frames never redraw it, so the old block stays on screen (a forced full render erases it).",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "hidden-cursor-shape",
+      "expected": "none",
+      "actual": "block"
+    }
+  },
+  {
+    "id": "sync.hold-keeps-last-complete-frame",
+    "finding": "RT-09",
+    "reason": "Mode 2026 is tracked by the terminal but the renderer ignores it and paints partial frames immediately.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "canvas-unchanged-while-held",
+      "expected": [],
+      "actual": ["0:0", "0:1", "0:2", "0:3"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "incremental.overflow-ink-matches-full-render",
+    "finding": "RT-04",
+    "reason": "Redrawing a dirty row's neighbour clears that neighbour's band, erasing mark ink that overflows from the undrawn row below; incremental != full.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "incremental-equals-full",
+      "expected": [],
+      "actual": ["1:0", "1:1", "1:2"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "dpr.background-run-has-no-seams-at-1-25",
+    "finding": "RT-05",
+    "reason": "Per-cell background rects land on fractional device pixels at DPR 1.25 and anti-alias, leaving seams at every non-integer cell boundary (pinned Chromium, 9px cells).",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "seam-boundaries",
+      "expected": [],
+      "actual": [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "input.alt-letter-sends-esc-prefix",
+    "finding": "IN-01",
+    "reason": "InputHandler pushes only DECCKM into the key encoder and drops the Alt modifier, so Alt+b emits 'b' instead of ESC b.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "alt-b",
+      "expected": ["\u001bb"],
+      "actual": ["b"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "input.kitty-disambiguate-escape",
+    "finding": "IN-03",
+    "reason": "Kitty keyboard flags pushed by the application are never read back into the key encoder (no pinned getter), so Escape stays legacy ESC.",
+    "owner": "ghostty-web maintainers",
+    "scope": "backend",
+    "engines": ["web-pinned"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "kitty-escape",
+      "expected": ["\u001b[27u"],
+      "actual": ["\u001b"]
+    }
+  },
+  {
+    "id": "focus.reports-blur-and-focus-when-1004-set",
+    "finding": "IN-07",
+    "reason": "Nothing emits CSI O / CSI I on blur/focus even when mode 1004 is set.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "focus-reports",
+      "expected": ["\u001b[O", "\u001b[I"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "mouse.sgr-wheel-reported-when-tracking",
+    "finding": "WEB-06",
+    "reason": "Terminal's capture-phase wheel handler stops propagation and scrolls/ignores, so InputHandler never encodes wheel reports while mouse tracking is on.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "wheel-reports",
+      "expected": ["\u001b[<65;4;3M"],
+      "actual": []
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "mouse.drag-selects-wide-characters",
+    "finding": "WEB-08",
+    "reason": "Selection text extraction emits a space for each wide-character spacer cell.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "selection-text",
+      "expected": "一二三",
+      "actual": "一 二 三"
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "api.paste-unbracketed-converts-newlines",
+    "finding": "IN-12",
+    "reason": "paste() sends text verbatim when 2004 is off; Ghostty's paste encoder maps LF to CR.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "unbracketed-paste",
+      "expected": ["a\rb"],
+      "actual": ["a\nb"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "link.osc8-javascript-scheme-not-opened",
+    "finding": "IN-14",
+    "reason": "OSC 8 activation calls window.open for any URI scheme, including javascript:.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "opened",
+      "expected": ["https://example.com/"],
+      "actual": ["javascript:alert(document.domain)", "https://example.com/"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  }
+]

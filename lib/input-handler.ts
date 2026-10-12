@@ -13,7 +13,7 @@
  * - Captures all keyboard input (preventDefault on everything)
  */
 
-import type { Ghostty } from './ghostty';
+import type { Ghostty, GhosttyTerminal } from './ghostty';
 import type { KeyEncoder } from './ghostty';
 import type { IKeyEvent } from './interfaces';
 import { Key, KeyAction, KeyEncoderOption, Mods } from './types';
@@ -181,6 +181,11 @@ export class InputHandler {
   private onKeyCallback?: (keyEvent: IKeyEvent) => void;
   private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
   private getModeCallback?: (mode: number) => boolean;
+  private getTerminalCallback?: () => GhosttyTerminal | undefined;
+  private keyupListener: ((e: KeyboardEvent) => void) | null = null;
+  // Only send Kitty releases for presses this handler forwarded to the application.
+  private readonly forwardedKittyKeys = new Set<string>();
+  private readonly clearForwardedKittyKeys = (): void => this.forwardedKittyKeys.clear();
   private onCopyCallback?: () => boolean;
   private mouseConfig?: MouseTrackingConfig;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
@@ -231,7 +236,8 @@ export class InputHandler {
     getMode?: (mode: number) => boolean,
     onCopy?: () => boolean,
     inputElement?: HTMLElement,
-    mouseConfig?: MouseTrackingConfig
+    mouseConfig?: MouseTrackingConfig,
+    getTerminal?: () => GhosttyTerminal | undefined
   ) {
     this.encoder = ghostty.createKeyEncoder();
     this.container = container;
@@ -241,6 +247,7 @@ export class InputHandler {
     this.onKeyCallback = onKey;
     this.customKeyEventHandler = customKeyEventHandler;
     this.getModeCallback = getMode;
+    this.getTerminalCallback = getTerminal;
     this.onCopyCallback = onCopy;
     this.mouseConfig = mouseConfig;
 
@@ -274,6 +281,17 @@ export class InputHandler {
       }
     }
 
+    this.keyupListener = (event: KeyboardEvent) => {
+      const forwarded = this.forwardedKittyKeys.delete(event.code);
+      if (!forwarded || this.isDisposed || this.isComposing || event.isComposing) return;
+      const terminal = this.nativeKittyTerminal();
+      if (terminal && (terminal.getKittyKeyboardFlags() & 2) !== 0) {
+        this.encodeNativeKitty(event, KeyAction.RELEASE, terminal);
+      }
+    };
+    this.container.addEventListener('keyup', this.keyupListener);
+    // Capture blur from the hidden textarea too; the next release may belong to another app.
+    this.container.addEventListener('blur', this.clearForwardedKittyKeys, true);
     this.keydownListener = this.handleKeyDown.bind(this);
     this.container.addEventListener('keydown', this.keydownListener);
 
@@ -362,6 +380,7 @@ export class InputHandler {
    */
   private handleKeyDown(event: KeyboardEvent): void {
     if (this.isDisposed) return;
+    if (!event.repeat) this.forwardedKittyKeys.delete(event.code);
 
     // Ignore keydown events during composition
     // Note: Some browsers send keyCode 229 for all keys during composition
@@ -399,6 +418,17 @@ export class InputHandler {
       if (this.onCopyCallback && this.onCopyCallback()) {
         event.preventDefault();
       }
+      return;
+    }
+
+    // An active native Kitty protocol must not be bypassed by the legacy key table.
+    const kittyTerminal = this.nativeKittyTerminal();
+    if (kittyTerminal) {
+      this.encodeNativeKitty(
+        event,
+        event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
+        kittyTerminal
+      );
       return;
     }
 
@@ -514,6 +544,14 @@ export class InputHandler {
 
     // For non-printable keys or keys with modifiers, encode using Ghostty
     try {
+      // Active native Kitty mode returned above. A pop, screen switch or reset
+      // can disable it without touching this encoder's cached options; leaving
+      // those flags set turns Ctrl+B/C/etc. into plain text after Vim exits.
+      // Only clear terminal-owned flags, not a standalone encoder's settings.
+      if (this.getTerminalCallback?.()?.backend === 'libghostty-vt') {
+        this.encoder.setOption(KeyEncoderOption.KITTY_KEYBOARD_FLAGS, 0);
+      }
+
       // Sync encoder options with terminal mode state
       // Mode 1 (DECCKM) controls whether arrow keys send CSI or SS3 sequences
       if (this.getModeCallback) {
@@ -552,6 +590,49 @@ export class InputHandler {
     } catch (error) {
       // Encoding failed - log but don't crash
       console.warn('Failed to encode key:', event.code, error);
+    }
+  }
+
+  private nativeKittyTerminal(): GhosttyTerminal | undefined {
+    const terminal = this.getTerminalCallback?.();
+    return terminal?.backend === 'libghostty-vt' && terminal.getKittyKeyboardFlags() !== 0
+      ? terminal
+      : undefined;
+  }
+
+  private encodeNativeKitty(
+    event: KeyboardEvent,
+    action: KeyAction,
+    terminal: GhosttyTerminal
+  ): void {
+    const key = this.mapKeyCode(event.code);
+    if (key === null) return;
+    this.encoder.syncFromTerminal(terminal);
+    const printable = Array.from(event.key).length === 1;
+    const letter = /^Key([A-Z])$/.exec(event.code);
+    const digit = /^Digit([0-9])$/.exec(event.code);
+    const unshifted = letter
+      ? letter[1].toLowerCase()
+      : digit
+        ? digit[1]
+        : printable
+          ? event.key
+          : '';
+    const encoded = this.encoder.encode({
+      action,
+      key,
+      mods: this.extractModifiers(event),
+      utf8: printable ? event.key : undefined,
+      unshiftedCodepoint: unshifted.codePointAt(0) ?? 0,
+      composing: false,
+    });
+    event.preventDefault();
+    event.stopPropagation();
+    const data = new TextDecoder().decode(encoded);
+    if (data) {
+      if (action !== KeyAction.RELEASE) this.forwardedKittyKeys.add(event.code);
+      this.onDataCallback(data);
+      if (action !== KeyAction.RELEASE) this.recordKeyDownData(data);
     }
   }
 
@@ -1036,9 +1117,17 @@ export class InputHandler {
   dispose(): void {
     if (this.isDisposed) return;
 
+    this.forwardedKittyKeys.clear();
+    this.container.removeEventListener('blur', this.clearForwardedKittyKeys, true);
+
     if (this.keydownListener) {
       this.container.removeEventListener('keydown', this.keydownListener);
       this.keydownListener = null;
+    }
+
+    if (this.keyupListener) {
+      this.container.removeEventListener('keyup', this.keyupListener);
+      this.keyupListener = null;
     }
 
     if (this.keypressListener) {
@@ -1093,6 +1182,9 @@ export class InputHandler {
       this.container.removeEventListener('wheel', this.wheelListener);
       this.wheelListener = null;
     }
+
+    // Release the WASM key encoder owned by this handler
+    this.encoder.dispose();
 
     this.isDisposed = true;
   }

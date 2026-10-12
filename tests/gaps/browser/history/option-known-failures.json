@@ -1,0 +1,74 @@
+[
+  {
+    "id": "options.runtime-theme-applies",
+    "finding": "OPT-03",
+    "reason": "Terminal.handleOptionChange('theme') only logs 'theme changes after open() are not yet fully supported'; the renderer and WASM palette keep the constructor theme.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "runtime-theme-colors",
+      "expected": {
+        "background": "#f4f1de",
+        "foreground": "#3d405b",
+        "red": "#9b2226"
+      },
+      "actual": {
+        "background": "#14213d",
+        "foreground": "#fca311",
+        "red": "#d62828"
+      }
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "options.runtime-font-change-keeps-right-edge",
+    "finding": "OPT-01",
+    "reason": "handleFontChange calls renderer.render without scrollbarOpacity (defaults to 1), so renderScrollbar clears the right 14 CSS px of every row with the background; rows not redrawn later keep the hole.",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "right-edge-equals-fresh",
+      "expected": [],
+      "actual": ["0:21", "0:22"]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  },
+  {
+    "id": "options.font-size-13-tall-glyphs-fit-cell",
+    "finding": "OPT-02",
+    "reason": "CanvasRenderer.measureFont derives cell height and baseline from the ink box of 'M'; at 13px the dot of j, '|' and '(' extend past the cell and are clipped (15px happens to fit).",
+    "owner": "ghostty-web maintainers",
+    "scope": "js-layer",
+    "engines": ["web-pinned", "web-candidate"],
+    "expires": "2027-01-01",
+    "failure": {
+      "kind": "assertion",
+      "assertion": "tall-glyphs-match-oracle",
+      "expected": [],
+      "actual": [
+        "0:1 'j': shape: ink box 4x10 vs 4x14",
+        "0:7 '|': shape: ink box 2x12 vs 2x13",
+        "0:10 '(': shape: ink box 4x11 vs 4x12"
+      ]
+    },
+    "candidateReview": {
+      "reviewed": "2026-10-10",
+      "wasmSha256": "8b218c0c750fc74e63f3ebf4005fb6967c7b1fba2f2a84d19a08bd4ca5812f49",
+      "evidence": "Reviewed native/legacy browser matrix 2026-10-10: identical assertion id, desired value and observed value; existing shared JavaScript/renderer behavior. No golden or expected value changed."
+    }
+  }
+]
