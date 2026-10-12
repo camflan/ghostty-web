@@ -15,6 +15,8 @@ import type {
   NativeHostEvent,
   NativeMouseEvent,
   RawExports,
+  ScreenPoint,
+  ScreenSelection,
   TerminalBackend,
   VtBackend,
 } from './backends/types';
@@ -45,7 +47,7 @@ export {
   type RenderStateColors,
   type RenderStateCursor,
 };
-export type { BackendKind, GhosttyLoadOptions };
+export type { BackendKind, GhosttyLoadOptions, ScreenPoint, ScreenSelection };
 
 /** Exports accepted by the public constructors (legacy or libghostty-vt). */
 type BridgeExports = GhosttyWasmExports | RawExports;
@@ -432,6 +434,53 @@ export class GhosttyTerminal {
     this.assertLive();
     if (!this.impl.takeHostEvents) throw nativeOnly(this.kind, 'takeHostEvents');
     return this.impl.takeHostEvents();
+  }
+
+  // ==========================================================================
+  // Selection (libghostty-vt only: terminal-owned, follows its content)
+  // ==========================================================================
+
+  /**
+   * libghostty-vt only: select from `start` (the anchor) to `end`, both in the
+   * active screen's SCREEN space (`y` = absolute buffer row: history first,
+   * then the active area). The terminal tracks the endpoints, so the selection
+   * moves with its content through output, history pruning, ED3 and reflow;
+   * endpoints whose rows are pruned are remapped to the oldest retained row.
+   * Switching between primary and alternate screen, or a full reset, clears
+   * it. Throws RangeError for points outside the active screen.
+   */
+  setSelectionRange(start: ScreenPoint, end: ScreenPoint): void {
+    this.assertLive();
+    if (!this.impl.setSelectionRange) throw nativeOnly(this.kind, 'setSelectionRange');
+    this.impl.setSelectionRange(start, end);
+  }
+
+  /**
+   * libghostty-vt only: the active screen's selection endpoints as they are
+   * now (read on every call; never cache them across writes or resizes).
+   */
+  getSelectionRange(): ScreenSelection | null {
+    this.assertLive();
+    if (!this.impl.getSelectionRange) throw nativeOnly(this.kind, 'getSelectionRange');
+    return this.impl.getSelectionRange();
+  }
+
+  /** libghostty-vt only: remove the active screen's selection. */
+  clearSelection(): void {
+    this.assertLive();
+    if (!this.impl.clearSelection) throw nativeOnly(this.kind, 'clearSelection');
+    this.impl.clearSelection();
+  }
+
+  /**
+   * libghostty-vt only: the selection as copy text, formatted like Ghostty's
+   * own copy (plain, soft wraps unwrapped, trailing blanks trimmed, spacers of
+   * wide characters omitted, full graphemes). '' when there is no selection.
+   */
+  getSelectionText(): string {
+    this.assertLive();
+    if (!this.impl.getSelectionText) throw nativeOnly(this.kind, 'getSelectionText');
+    return this.impl.getSelectionText();
   }
 
   // ==========================================================================

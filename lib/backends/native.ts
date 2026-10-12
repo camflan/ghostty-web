@@ -32,6 +32,8 @@ import type {
   KeyEncoderBackend,
   NativeHostEvent,
   NativeMouseEvent,
+  ScreenPoint,
+  ScreenSelection,
   TerminalBackend,
   VtBackend,
 } from './types';
@@ -261,6 +263,8 @@ class Scratch {
   readonly pasteMime: number;
   readonly pasteMimeText: number;
   readonly title: number;
+  readonly selection: number;
+  readonly selectionFormat: number;
 
   constructor(abi: NativeAbi) {
     const L = abi.layout;
@@ -288,6 +292,8 @@ class Scratch {
       pasteMime: take(L.string.size),
       pasteMimeText: take(TEXT_PLAIN.length),
       title: take(L.string.size),
+      selection: take(L.selection.size),
+      selectionFormat: take(L.selectionFormat.size),
     };
     this.size = offset;
     this.base = abi.alloc(offset);
@@ -308,6 +314,8 @@ class Scratch {
     this.pasteMime = this.base + rel.pasteMime;
     this.pasteMimeText = this.base + rel.pasteMimeText;
     this.title = this.base + rel.title;
+    this.selection = this.base + rel.selection;
+    this.selectionFormat = this.base + rel.selectionFormat;
   }
 }
 
@@ -396,6 +404,7 @@ export class NativeTerminal implements TerminalBackend {
   private readonly input: GrowBuffer;
   private readonly codepoints: GrowBuffer;
   private readonly uri: GrowBuffer;
+  private readonly selectionText: GrowBuffer;
   private cols: number;
   private rows: number;
   /** Real cell metrics from the host; null until known (size reports decline). */
@@ -474,6 +483,7 @@ export class NativeTerminal implements TerminalBackend {
     this.input = new GrowBuffer(this.abi);
     this.codepoints = new GrowBuffer(this.abi);
     this.uri = new GrowBuffer(this.abi);
+    this.selectionText = new GrowBuffer(this.abi);
     this.mouseOut = new GrowBuffer(this.abi);
     const ex = this.abi.exports;
     try {
@@ -662,6 +672,7 @@ export class NativeTerminal implements TerminalBackend {
     this.input.release();
     this.codepoints.release();
     this.uri.release();
+    this.selectionText.release();
     this.rowCells = this.rowIterator = this.renderState = this.handle = 0;
     this.scratch = null;
     this.replies = [];
@@ -1020,6 +1031,136 @@ export class NativeTerminal implements TerminalBackend {
       if (!write(userdata, ptr, chunk.length)) return false;
     }
     return true;
+  }
+
+  // ==========================================================================
+  // Selection (terminal-owned: tracked pins follow output, pruning and reflow)
+  // ==========================================================================
+
+  /**
+   * Install the active screen's selection between two SCREEN points. The
+   * terminal copies it into tracked pins immediately (OPT_SELECTION), so it
+   * follows its content through output, history pruning (pruned endpoints are
+   * remapped to the oldest retained row), ED3 and reflow. Primary/alternate
+   * switches and full resets clear it natively.
+   */
+  setSelectionRange(start: ScreenPoint, end: ScreenPoint): void {
+    const rows = this.getScrollbackLength() + this.rows;
+    for (const [name, p] of [
+      ['start', start],
+      ['end', end],
+    ] as const) {
+      const inside =
+        Number.isInteger(p.x) &&
+        Number.isInteger(p.y) &&
+        p.x >= 0 &&
+        p.x < this.cols &&
+        p.y >= 0 &&
+        p.y < rows;
+      if (!inside) {
+        throw new RangeError(
+          `libghostty-vt: selection ${name} (${p.x}, ${p.y}) is outside the ${this.cols}x${rows} screen`
+        );
+      }
+    }
+    const s = this.scratch!;
+    const S = this.L.selection;
+    this.initSized(s.selection, S.size);
+    this.refAt(this.L.pointTag.SCREEN, start.x, start.y, s.selection + S.start);
+    this.refAt(this.L.pointTag.SCREEN, end.x, end.y, s.selection + S.end);
+    this.set('SELECTION', s.selection);
+  }
+
+  /**
+   * The active screen's selection endpoints, converted to SCREEN points right
+   * away: the untracked refs DATA_SELECTION returns die at the next mutation.
+   */
+  getSelectionRange(): ScreenSelection | null {
+    const s = this.scratch!;
+    const S = this.L.selection;
+    this.initSized(s.selection, S.size);
+    const result = this.abi.exports.ghostty_terminal_get(
+      this.handle,
+      this.L.terminalData.SELECTION,
+      s.selection
+    ) as number;
+    if (result === this.L.result.NO_VALUE) return null;
+    this.abi.check(result, 'terminal_get SELECTION');
+    return {
+      start: this.screenPoint(s.selection + S.start),
+      end: this.screenPoint(s.selection + S.end),
+    };
+  }
+
+  clearSelection(): void {
+    this.set('SELECTION', 0);
+  }
+
+  /**
+   * Copy text of the active selection, formatted like Ghostty's own copy
+   * (Screen.selectionString): plain text, soft wraps unwrapped, trailing
+   * whitespace trimmed, wide-character spacers omitted, graphemes complete.
+   */
+  getSelectionText(): string {
+    const abi = this.abi;
+    const L = this.L;
+    const F = L.selectionFormat;
+    const s = this.scratch!;
+    const opts = s.selectionFormat;
+    this.initSized(opts, F.size);
+    const view = abi.view();
+    view.setInt32(opts + F.emit, L.formatterFormat.PLAIN, true);
+    view.setUint8(opts + F.unwrap, 1);
+    view.setUint8(opts + F.trim, 1);
+    view.setUint32(opts + F.selection, 0, true); // NULL: the terminal's active selection
+    const format = (buf: number, len: number) =>
+      abi.exports.ghostty_terminal_selection_format_buf(
+        this.handle,
+        opts,
+        buf,
+        len,
+        s.out2
+      ) as number;
+    let cap = this.selectionText.cap;
+    for (;;) {
+      const buf = cap > 0 ? this.selectionText.ensure(cap) : 0;
+      const result = format(buf, cap);
+      if (result === L.result.NO_VALUE) return '';
+      const n = abi.view().getUint32(s.out2, true);
+      if (result === L.result.OUT_OF_SPACE) {
+        // A size query reports OUT_OF_SPACE even when the text is empty.
+        if (n === 0) return '';
+        if (n > cap) {
+          cap = n;
+          continue;
+        }
+      }
+      abi.check(result, 'ghostty_terminal_selection_format_buf');
+      return n === 0 ? '' : abi.readString(buf, n);
+    }
+  }
+
+  /** Zero a sized struct and set its leading `size` field. */
+  private initSized(ptr: number, size: number): void {
+    this.abi.bytes().fill(0, ptr, ptr + size);
+    this.abi.view().setUint32(ptr, size, true);
+  }
+
+  /** SCREEN coordinates of an untracked grid ref (valid only until the next mutation). */
+  private screenPoint(ref: number): ScreenPoint {
+    const out = this.scratch!.out2;
+    const P = this.L.point;
+    this.abi.check(
+      this.abi.exports.ghostty_terminal_point_from_grid_ref(
+        this.handle,
+        ref,
+        this.L.pointTag.SCREEN,
+        out
+      ) as number,
+      'point_from_grid_ref SCREEN'
+    );
+    const view = this.abi.view();
+    return { x: view.getUint16(out + P.x, true), y: view.getUint32(out + P.y, true) };
   }
 
   /** Unknown modes report false (the native API answers INVALID_VALUE for them). */
@@ -1677,6 +1818,11 @@ export class NativeTerminal implements TerminalBackend {
 
   /** Resolve a point into the scratch grid ref; coordinates are pre-validated. */
   private gridRef(tag: number, x: number, y: number): void {
+    this.refAt(tag, x, y, this.scratch!.gridRef);
+  }
+
+  /** Resolve a point into the (sized) GhosttyGridRef at `out`. */
+  private refAt(tag: number, x: number, y: number, out: number): void {
     const s = this.scratch!;
     const P = this.L.point;
     const view = this.abi.view();
@@ -1684,9 +1830,9 @@ export class NativeTerminal implements TerminalBackend {
     view.setInt32(s.point + P.tag, tag, true);
     view.setUint16(s.point + P.value + P.x, x, true);
     view.setUint32(s.point + P.value + P.y, y, true);
-    view.setUint32(s.gridRef, this.L.gridRefSize, true);
+    view.setUint32(out, this.L.gridRefSize, true);
     this.abi.check(
-      this.abi.exports.ghostty_terminal_grid_ref(this.handle, s.point, s.gridRef) as number,
+      this.abi.exports.ghostty_terminal_grid_ref(this.handle, s.point, out) as number,
       `grid_ref (${x}, ${y})`
     );
   }

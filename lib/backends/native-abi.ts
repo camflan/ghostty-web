@@ -82,6 +82,8 @@ const REQUIRED_EXPORTS = {
   ghostty_mouse_event_clear_button: 1,
   ghostty_mouse_event_set_mods: 2,
   ghostty_mouse_event_set_position: 2,
+  ghostty_terminal_selection_format_buf: 5,
+  ghostty_terminal_point_from_grid_ref: 4,
 } as const;
 
 export type NativeExports = Record<keyof typeof REQUIRED_EXPORTS, WasmFn> & {
@@ -255,9 +257,12 @@ function resolveLayout(r: Resolver) {
     'GhosttyGridRef',
     'GhosttyMouseEncoderSize',
     'GhosttyPaste',
+    'GhosttySelection',
+    'GhosttyTerminalSelectionFormatOptions',
   ]) {
     r.sized(t);
   }
+  const gridRefSize = r.size('GhosttyGridRef');
   const styleColor = r.struct('GhosttyStyleColor', { tag: 4, value: 0 });
   const styleColorValue = r.struct('GhosttyStyleColorValue', { palette: 1, rgb: 3 });
   const keyActions = r.allEnums('GhosttyKeyAction');
@@ -306,6 +311,7 @@ function resolveLayout(r: Resolver) {
       'MODE_DEFAULT',
       'DEFAULT_CURSOR_STYLE',
       'DEFAULT_CURSOR_BLINK',
+      'SELECTION',
     ] as const),
     terminalData: r.enums('GhosttyTerminalData', [
       'COLS',
@@ -319,6 +325,7 @@ function resolveLayout(r: Resolver) {
       'COLOR_PALETTE_DEFAULT',
       'KITTY_KEYBOARD_FLAGS',
       'TITLE',
+      'SELECTION',
     ] as const),
     screen: r.enums('GhosttyTerminalScreen', ['PRIMARY', 'ALTERNATE'] as const),
     terminalCursorStyle: r.enums('GhosttyTerminalCursorStyle', [
@@ -341,7 +348,21 @@ function resolveLayout(r: Resolver) {
       'GRAPHEMES_BUF',
     ] as const),
     rowFlag: r.enums('GhosttyRowData', ['WRAP_CONTINUATION'] as const),
-    pointTag: r.enums('GhosttyPointTag', ['ACTIVE', 'VIEWPORT', 'HISTORY'] as const),
+    pointTag: r.enums('GhosttyPointTag', ['ACTIVE', 'VIEWPORT', 'SCREEN', 'HISTORY'] as const),
+    formatterFormat: r.enums('GhosttyFormatterFormat', ['PLAIN'] as const),
+    selection: {
+      size: r.size('GhosttySelection'),
+      ...r.struct('GhosttySelection', { start: gridRefSize, end: gridRefSize, rectangle: 1 }),
+    },
+    selectionFormat: {
+      size: r.size('GhosttyTerminalSelectionFormatOptions'),
+      ...r.struct('GhosttyTerminalSelectionFormatOptions', {
+        emit: 4,
+        unwrap: 1,
+        trim: 1,
+        selection: 4,
+      }),
+    },
     cursorStyle: r.enums('GhosttyRenderStateCursorVisualStyle', [
       'BAR',
       'BLOCK',
@@ -481,7 +502,7 @@ function resolveLayout(r: Resolver) {
       ...r.struct('GhosttyPoint', { tag: 4, value: 0 }),
       ...r.struct('GhosttyPointCoordinate', { x: 2, y: 4 }),
     },
-    gridRefSize: r.size('GhosttyGridRef'),
+    gridRefSize,
     modeConfig: {
       size: r.size('GhosttyTerminalModeConfig'),
       ...r.struct('GhosttyTerminalModeConfig', { mode: 2, value: 1 }),

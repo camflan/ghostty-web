@@ -56,6 +56,23 @@ export interface NativeMouseEvent {
   anyButtonPressed: boolean;
 }
 
+/**
+ * A cell in the active screen's SCREEN space: `x` is the column, `y` counts
+ * rows from the oldest retained history row (history rows first, then the
+ * active area). This is the same row space as ghostty-web's absolute buffer
+ * rows on the active screen.
+ */
+export interface ScreenPoint {
+  x: number;
+  y: number;
+}
+
+/** Terminal-owned selection endpoints; `start` is the anchor and may follow `end`. */
+export interface ScreenSelection {
+  start: ScreenPoint;
+  end: ScreenPoint;
+}
+
 /** Identity of the engine behind a facade. */
 export type BackendKind = 'legacy' | 'libghostty-vt';
 
@@ -148,6 +165,14 @@ export interface TerminalBackend {
   takeHostEvents?(): NativeHostEvent[];
   /** Native focus report for the current mode-1004 state; returns owned bytes. */
   encodeFocus?(focused: boolean): Uint8Array;
+  /** Install the active screen's terminal-owned (tracked) selection; points must be valid. */
+  setSelectionRange?(start: ScreenPoint, end: ScreenPoint): void;
+  /** Endpoints of the active screen's selection, read now; null when there is none. */
+  getSelectionRange?(): ScreenSelection | null;
+  /** Remove the active screen's selection. */
+  clearSelection?(): void;
+  /** Copy text of the selection (plain, soft wraps unwrapped, trailing blanks trimmed); '' when none. */
+  getSelectionText?(): string;
 }
 
 export interface KeyEncoderBackend {
