@@ -974,6 +974,14 @@ export class SelectionManager {
    * Start auto-scrolling in the given direction
    */
   private startAutoScroll(direction: number): void {
+    const viewportY = this.getViewportY();
+    const atBoundary =
+      direction < 0 ? viewportY >= this.wasmTerm.getScrollbackLength() : viewportY <= 0;
+    if (atBoundary) {
+      this.stopAutoScroll();
+      return;
+    }
+
     // Don't restart if already scrolling in same direction
     if (this.autoScrollInterval !== null && this.autoScrollDirection === direction) {
       return;
@@ -996,7 +1004,14 @@ export class SelectionManager {
       // scrollLines convention: negative = scroll up into history, positive = scroll down to newer
       // So direction maps directly to scrollLines sign
       const scrollAmount = SelectionManager.AUTO_SCROLL_SPEED * this.autoScrollDirection;
+      const before = this.getViewportY();
       (this.terminal as any).scrollLines(scrollAmount);
+      if (this.getViewportY() === before) {
+        // A timed near-edge drag must not jump to a viewport corner when
+        // scrolling is clamped. Outside-canvas movement is handled separately.
+        this.stopAutoScroll();
+        return;
+      }
 
       // Extend selection in the scroll direction
       // Key insight: we need to EXTEND the selection, not reset it to viewport edge
