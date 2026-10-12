@@ -938,6 +938,46 @@ describe('libghostty-vt mouse input', () => {
   });
 });
 
+describe('libghostty-vt focus input', () => {
+  test('requires the native focus export and manifest enum', () => {
+    expect(
+      () =>
+        new Ghostty(
+          patchedExports((ex) => {
+            ex.ghostty_focus_encode = undefined;
+          })
+        )
+    ).toThrow('missing export ghostty_focus_encode');
+    expect(
+      () =>
+        new Ghostty(
+          patchedManifest((manifest) => {
+            Reflect.deleteProperty(manifest.types, 'GhosttyFocusEvent');
+          })
+        )
+    ).toThrow('GhosttyFocusEvent');
+  });
+
+  test('encodes owned focus reports from live mode 1004 and guards lifetime', () => {
+    const term = fresh().createTerminal(10, 2);
+    try {
+      expect(term.encodeFocus(true)).toEqual(new Uint8Array(0));
+      term.write('\x1b[?1004h');
+      const gained = term.encodeFocus(true);
+      expect(new TextDecoder().decode(gained)).toBe('\x1b[I');
+      expect(new TextDecoder().decode(term.encodeFocus(false))).toBe('\x1b[O');
+      expect(new TextDecoder().decode(gained)).toBe('\x1b[I');
+      term.write('\x1b[?1004l');
+      expect(term.encodeFocus(false)).toHaveLength(0);
+      term.write('\x1b[?1004h\x1bc');
+      expect(term.encodeFocus(true)).toHaveLength(0);
+    } finally {
+      term.free();
+    }
+    expect(() => term.encodeFocus(true)).toThrow();
+  });
+});
+
 describe('libghostty-vt paste', () => {
   /** Encoded paste as a byte-per-char string (never decoded as UTF-8). */
   const paste = (t: GhosttyTerminal, text: string) =>

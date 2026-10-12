@@ -795,24 +795,24 @@
     },
     {
       "id": "focus.blur-report",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-07 (js-layer, gap on both engines): Nothing emits focus reports (ESC[O) on blur while mode 1004 is set"
+      "reason": "Legacy-only gap; native host focus integration passes the unchanged assertion. IN-07 (js-layer, legacy gap): Nothing emits focus reports (ESC[O) on blur while mode 1004 is set"
     },
     {
       "id": "focus.focus-report",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-07 (js-layer, gap on both engines): Nothing emits focus reports (ESC[I) on focus while mode 1004 is set"
+      "reason": "Legacy-only gap; native host focus integration passes the unchanged assertion. IN-07 (js-layer, legacy gap): Nothing emits focus reports (ESC[I) on focus while mode 1004 is set"
     },
     {
       "id": "focus.report-on-enable",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-07 (js-layer, gap on both engines): Native termio reports the current focus state when 1004 is enabled; ghostty-web has no host hook"
+      "reason": "Legacy-only gap; native host focus integration passes the unchanged assertion. IN-07 (js-layer, legacy gap): Native termio reports the current focus state when 1004 is enabled; ghostty-web has no host hook"
     },
     {
       "id": "reply.none-for-plain-text",

@@ -22,6 +22,9 @@ const plan = scopePlan();
 // Legacy failures fixed by the native core or native host integration. They
 // must stay REQUIRED on native even though they remain legacy gaps.
 const NATIVE_FIXED = [
+  'focus.blur-report',
+  'focus.focus-report',
+  'focus.report-on-enable',
   'paste.unbracketed-newline-to-cr',
   'paste.unbracketed-control-bytes',
   'paste.bracketed-end-marker-neutralised',

@@ -429,6 +429,7 @@ const api: HarnessApi = {
 
   setOptions(id, options) {
     const target = get(id).term.options as unknown as Record<string, unknown>;
+    if (options.disableStdin !== undefined) target.disableStdin = options.disableStdin;
     if (options.fontFamily !== undefined) target.fontFamily = options.fontFamily;
     if (options.fontSize !== undefined) target.fontSize = options.fontSize;
     if (options.theme !== undefined) target.theme = options.theme;

@@ -842,6 +842,23 @@ export class NativeTerminal implements TerminalBackend {
   // Paste
   // ==========================================================================
 
+  /** Encode a host focus state only while DEC mode 1004 is active. */
+  encodeFocus(focused: boolean): Uint8Array {
+    if (!this.getMode(1004, false)) return new Uint8Array(0);
+    const { abi } = this.backend;
+    const s = this.scratch!;
+    abi.check(
+      abi.exports.ghostty_focus_encode(
+        focused ? abi.layout.focusEvent.GAINED : abi.layout.focusEvent.LOST,
+        s.out2,
+        16,
+        s.out
+      ),
+      'focus_encode'
+    );
+    return abi.bytes().slice(s.out2, s.out2 + abi.view().getUint32(s.out, true));
+  }
+
   /**
    * Encode pasted UTF-8 text for the pty with upstream `ghostty_terminal_paste`,
    * applying the terminal's live state: unsafe control bytes become spaces,

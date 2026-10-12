@@ -74,6 +74,7 @@ export interface CreateOptions {
 
 /** Options changed at runtime through the public `terminal.options` proxy. */
 export interface RuntimeOptions {
+  disableStdin?: boolean;
   fontFamily?: string;
   fontSize?: number;
   theme?: ThemeSpec;

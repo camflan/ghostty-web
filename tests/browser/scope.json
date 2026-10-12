@@ -245,10 +245,10 @@
     },
     {
       "id": "focus.reports-blur-and-focus-when-1004-set",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-07 [js-layer]: Nothing emits CSI O / CSI I on blur/focus even when mode 1004 is set. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "reason": "Legacy-only gap; native host focus integration passes the unchanged assertion. IN-07 [js-layer]: Nothing emits CSI O / CSI I on blur/focus even when mode 1004 is set. (provenance: tests/gaps/browser/history/known-failures.json)"
     },
     {
       "id": "focus.no-reports-without-1004",
@@ -691,6 +691,13 @@
       "gaps": ["web-pinned"],
       "unsupported": [],
       "reason": "Legacy clipboard paste forwards control bytes and LF verbatim instead of using native paste sanitization and newline conversion."
+    },
+    {
+      "id": "focus.internal-transfers-and-disabled-stdin",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy has no focus reporting after stdin is reenabled; native tracks terminal focus independently of internal textarea transfers."
     }
   ]
 }

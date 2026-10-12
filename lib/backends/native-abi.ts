@@ -34,6 +34,7 @@ const REQUIRED_EXPORTS = {
   ghostty_terminal_get: 3,
   ghostty_terminal_vt_write: 3,
   ghostty_terminal_paste: 3,
+  ghostty_focus_encode: 4,
   ghostty_terminal_grid_ref: 3,
   ghostty_grid_ref_cell: 2,
   ghostty_grid_ref_row: 2,
@@ -387,6 +388,7 @@ function resolveLayout(r: Resolver) {
       size: r.size('GhosttyMousePosition'),
       ...r.struct('GhosttyMousePosition', { x: 4, y: 4 }),
     },
+    focusEvent: r.enums('GhosttyFocusEvent', ['GAINED', 'LOST'] as const),
     pasteSource: r.enums('GhosttyPasteSource', ['TEXT'] as const),
     clipboardLocation: r.enums('GhosttyClipboardLocation', ['STANDARD'] as const),
     paste: {

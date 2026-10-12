@@ -127,6 +127,8 @@ export interface TerminalBackend {
    * copy (empty for empty text); queued replies are untouched.
    */
   encodePaste?(data: Uint8Array): Uint8Array;
+  /** Native focus report for the current mode-1004 state; returns owned bytes. */
+  encodeFocus?(focused: boolean): Uint8Array;
 }
 
 export interface KeyEncoderBackend {

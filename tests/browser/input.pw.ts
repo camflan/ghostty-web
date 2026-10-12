@@ -120,6 +120,30 @@ rtest('focus.reports-blur-and-focus-when-1004-set', async (ctx) => {
   ctx.checks.equal('focus-reports', (await term.events()).data, ['\x1b[O', '\x1b[I']);
 });
 
+rtest('focus.internal-transfers-and-disabled-stdin', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 10, rows: 3 });
+  await term.writeAndSettle('\x1b[?1004h');
+  await term.clearEvents();
+  // Playwright's locator.focus() first blurs the active element explicitly,
+  // producing a real loss with relatedTarget=null. Use DOM focus directly to
+  // exercise the internal transfer performed by Terminal/SelectionManager.
+  await ctx.harness.page.locator('textarea').evaluate((node) => node.focus());
+  await ctx.harness.page.locator('.host').evaluate((node) => (node as HTMLElement).focus());
+  await term.clickCell(1, 1);
+  await ctx.harness.frame();
+  ctx.checks.equal('internal-transfers', (await term.events()).data, []);
+  await term.setOptions({ disableStdin: true });
+  await ctx.harness.page.click('#outside');
+  await term.clickCell(1, 1);
+  await ctx.harness.page.click('#outside');
+  await term.setOptions({ disableStdin: false });
+  ctx.checks.equal('disabled-and-no-catch-up', (await term.events()).data, []);
+  await term.clickCell(1, 1);
+  await ctx.harness.page.click('#outside');
+  await ctx.harness.frame();
+  ctx.checks.equal('reenabled-focus-changes', (await term.events()).data, ['\x1b[I', '\x1b[O']);
+});
+
 rtest('focus.no-reports-without-1004', async (ctx) => {
   const term = await ctx.harness.create({ cols: 10, rows: 3 });
   await term.clickCell(1, 1);

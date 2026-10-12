@@ -287,6 +287,35 @@ and reentrant host listeners. A trusted Chromium clipboard case checks sanitizat
 and mode transitions. Three core gaps and the browser newline gap pass their
 original assertions and become required on native; legacy failures remain explicit.
 
+## Post-paste slice: native focus reports
+
+The native backend uses manifest-resolved `ghostty_focus_encode()` for mode-1004
+reports. `Terminal` tracks focus across its container and hidden textarea as one
+input surface; internal transfers do not emit duplicate loss/gain pairs. Window
+focus changes report only for the terminal owning DOM focus. Disabled stdin still
+tracks state but emits nothing, with no catch-up report when re-enabled. Reports
+do not clear selection or mark user-echo pending. `blur()` now blurs a focused
+textarea as well as the container; native `focus()` no longer schedules a delayed
+refocus that could steal focus back. Disposal removes observers before removing
+focused elements. Legacy focus behavior is unchanged.
+
+Writes observe mode 1004 before and after upstream parsing. An observable off→on
+transition reports the current host focus after the write's other replies. Split
+sequences work because upstream retains parser state. RIS/reset disable reporting;
+DECSTR follows upstream's retained mode. Three existing core focus gaps and the
+trusted-pointer browser gap pass unchanged. Eight new host tests, two bridge tests
+and one browser lifecycle case cover internal transfers, multiple terminals,
+window events, shadow roots, disabled stdin, reset and teardown.
+
+**Upstream C API limit, not full native-app parity:** there is no mode-change
+callback or focused-state setter at this pin. Repeated `?1004h`, an off/on pair
+within one write that starts on, and restoring an already-on mode are not observable
+as new enables. Enable-triggered reports follow the write's queued replies rather
+than appearing at the native app's exact in-stream position; reentrant host listeners
+can also interleave focus events with replies. The host does not add a second VT
+parser to imitate these cases. Exact parity needs an upstream focused-state option
+with native report-on-enable, or a mode-change hook.
+
 ## Commands
 
 ```bash

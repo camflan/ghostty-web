@@ -403,6 +403,13 @@ export class GhosttyTerminal {
     return this.impl.encodePaste(new TextEncoder().encode(text));
   }
 
+  /** @internal Encode a focus change for live mode 1004 (libghostty-vt only). */
+  encodeFocus(focused: boolean): Uint8Array {
+    this.assertLive();
+    if (!this.impl.encodeFocus) throw nativeOnly(this.kind, 'encodeFocus');
+    return this.impl.encodeFocus(focused);
+  }
+
   // ==========================================================================
   // RenderState API
   // ==========================================================================
