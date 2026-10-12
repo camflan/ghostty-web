@@ -124,6 +124,12 @@ export class CanvasRenderer {
   // Current buffer being rendered (for grapheme lookups)
   private currentBuffer: IRenderable | null = null;
 
+  // Viewport lines of the frame being rendered (a band also draws the row below)
+  private frameLine?: (y: number) => GhosttyCell[] | null;
+
+  // Measured ink ascent per font and text (see mayReachRowAbove)
+  private inkAscents = new Map<string, number>();
+
   // Selection manager (for rendering selection)
   private selectionManager?: SelectionManager;
   // Cached selection coordinates for current render pass (viewport-relative)
@@ -227,6 +233,7 @@ export class CanvasRenderer {
    */
   public remeasureFont(): void {
     this.metrics = this.measureFont();
+    this.inkAscents.clear();
   }
 
   // ==========================================================================
@@ -338,23 +345,14 @@ export class CanvasRenderer {
       cursor.x !== this.lastCursorPosition.x ||
       cursor.y !== this.lastCursorPosition.y ||
       cursorAppearanceChanged;
+    // Cursor rows are repainted in the row pass below rather than standalone,
+    // so they get exactly the pixels of a full redraw (see renderLine).
+    const cursorRows: number[] = [];
     if (cursorMoved || this.cursorBlink) {
-      // Mark cursor lines as needing redraw
-      if (!forceAll && !buffer.isRowDirty(cursor.y)) {
-        // Need to redraw cursor line
-        const line = buffer.getLine(cursor.y);
-        if (line) {
-          this.renderLine(line, cursor.y, dims.cols);
-        }
-      }
+      cursorRows.push(cursor.y);
       if (cursorMoved && this.lastCursorPosition.y !== cursor.y) {
-        // Also redraw old cursor line if cursor moved to different line
-        if (!forceAll && !buffer.isRowDirty(this.lastCursorPosition.y)) {
-          const line = buffer.getLine(this.lastCursorPosition.y);
-          if (line) {
-            this.renderLine(line, this.lastCursorPosition.y, dims.cols);
-          }
-        }
+        // Also erase the cursor from its previous row
+        cursorRows.push(this.lastCursorPosition.y);
       }
     }
 
@@ -452,14 +450,12 @@ export class CanvasRenderer {
       this.previousHoveredLinkRange = this.hoveredLinkRange;
     }
 
-    // Track if anything was actually rendered
-    let anyLinesRendered = false;
-
-    // Determine which rows need rendering.
-    // We also include adjacent rows (above and below) for each dirty row to handle
-    // glyph overflow - tall glyphs like Devanagari vowel signs can extend into
-    // adjacent rows' visual space.
-    const rowsToRender = new Set<number>();
+    // Determine which row bands to repaint. A band's pixels depend only on its
+    // own row and on the row below it, whose tall glyphs (accents, Devanagari
+    // vowel signs, box drawing) overflow upward into it (see renderLine). So a
+    // changed row repaints its own band and the band above it; untouched bands
+    // already hold exactly what a full redraw would paint.
+    const repaint: boolean[] = new Array(dims.rows).fill(false);
     for (let y = 0; y < dims.rows; y++) {
       // When scrolled, always force render all lines since we're showing scrollback
       const needsRender =
@@ -468,49 +464,36 @@ export class CanvasRenderer {
           : forceAll || buffer.isRowDirty(y) || selectionRows.has(y) || hyperlinkRows.has(y);
 
       if (needsRender) {
-        rowsToRender.add(y);
-        // Include adjacent rows to handle glyph overflow
-        if (y > 0) rowsToRender.add(y - 1);
-        if (y < dims.rows - 1) rowsToRender.add(y + 1);
+        repaint[y] = true;
+        // The band above shows this row's upward glyph overflow
+        if (y > 0) repaint[y - 1] = true;
       }
     }
+    for (const y of cursorRows) {
+      if (y >= 0 && y < dims.rows) repaint[y] = true;
+    }
+
+    // Lines for this frame, each fetched at most once (a band also reads the row below).
+    const lines: Array<GhosttyCell[] | null | undefined> = new Array(dims.rows);
+    this.frameLine = (y: number): GhosttyCell[] | null => {
+      if (y < 0 || y >= dims.rows) return null;
+      if (lines[y] === undefined) {
+        lines[y] = this.fetchLine(buffer, y, viewportY, scrollbackProvider, scrollbackLength);
+      }
+      return lines[y] ?? null;
+    };
 
     // Render each line
     for (let y = 0; y < dims.rows; y++) {
-      if (!rowsToRender.has(y)) {
+      if (!repaint[y]) {
         continue;
       }
-
-      anyLinesRendered = true;
-
-      // Fetch line from scrollback or visible screen
-      let line: GhosttyCell[] | null = null;
-      if (viewportY > 0) {
-        // Scrolled up - need to fetch from scrollback + visible screen
-        // When scrolled up N lines, we want to show:
-        // - Scrollback lines (from the end) + visible screen lines
-
-        // Check if this row should come from scrollback or visible screen
-        if (y < viewportY && scrollbackProvider) {
-          // This row is from scrollback (upper part of viewport)
-          // Get from end of scrollback buffer
-          // Floor viewportY for array access (handles fractional values during smooth scroll)
-          const scrollbackOffset = scrollbackLength - Math.floor(viewportY) + y;
-          line = scrollbackProvider.getScrollbackLine(scrollbackOffset);
-        } else {
-          // This row is from visible screen (lower part of viewport)
-          const screenRow = viewportY > 0 ? y - Math.floor(viewportY) : y;
-          line = buffer.getLine(screenRow);
-        }
-      } else {
-        // At bottom - fetch from visible screen
-        line = buffer.getLine(y);
-      }
-
+      const line = this.frameLine(y);
       if (line) {
         this.renderLine(line, y, dims.cols);
       }
     }
+    this.frameLine = undefined;
 
     // Selection highlighting is now integrated into renderCellBackground/renderCellText
     // No separate overlay pass needed - this fixes z-order issues with complex glyphs
@@ -538,29 +521,70 @@ export class CanvasRenderer {
     buffer.clearDirty();
   }
 
+  /** Fetch a viewport row from scrollback or the visible screen. */
+  private fetchLine(
+    buffer: IRenderable,
+    y: number,
+    viewportY: number,
+    scrollbackProvider: IScrollbackProvider | undefined,
+    scrollbackLength: number
+  ): GhosttyCell[] | null {
+    if (viewportY > 0) {
+      // Scrolled up - need to fetch from scrollback + visible screen
+      // When scrolled up N lines, we want to show:
+      // - Scrollback lines (from the end) + visible screen lines
+
+      // Check if this row should come from scrollback or visible screen
+      if (y < viewportY && scrollbackProvider) {
+        // This row is from scrollback (upper part of viewport)
+        // Get from end of scrollback buffer
+        // Floor viewportY for array access (handles fractional values during smooth scroll)
+        const scrollbackOffset = scrollbackLength - Math.floor(viewportY) + y;
+        return scrollbackProvider.getScrollbackLine(scrollbackOffset);
+      }
+      // This row is from visible screen (lower part of viewport)
+      return buffer.getLine(y - Math.floor(viewportY));
+    }
+    // At bottom - fetch from visible screen
+    return buffer.getLine(y);
+  }
+
   /**
    * Render a single line using two-pass approach:
    * 1. First pass: Draw all cell backgrounds
    * 2. Second pass: Draw all cell text and decorations
+   * (then a third pass redraws tall glyphs of the row below that reach up here)
    *
    * This two-pass approach is necessary for proper rendering of complex scripts
    * like Devanagari where diacritics (like vowel sign ि) can extend LEFT of the
    * base character into the previous cell's visual area. If we draw backgrounds
    * and text in a single pass (cell by cell), the background of cell N would
    * cover any left-extending portions of graphemes from cell N-1.
+   *
+   * Everything is confined to this row's band, so the band's pixels depend only
+   * on this row and the row below it (whose tall glyphs reach up into it). An
+   * incremental frame that repaints the band therefore produces exactly the
+   * pixels of a full redraw, and pixels outside the band are never touched.
    */
   private renderLine(line: GhosttyCell[], y: number, cols: number): void {
-    const lineY = y * this.metrics.height;
-    const lineWidth = cols * this.metrics.width;
+    const top = this.deviceY(y);
+    const bottom = this.deviceY(y + 1);
+    const right = this.deviceX(cols);
+
+    // Backgrounds are filled in device pixels on shared, rounded cell edges, so
+    // they tile exactly at any devicePixelRatio: no anti-aliased seams between
+    // cells and no bleed into a neighbouring row's band.
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     // Clear line background then fill with theme color.
-    // We clear just the cell area - glyph overflow is handled by also
-    // redrawing adjacent rows (see render() method).
+    // We clear just the cell area - glyph overflow from the row below is
+    // redrawn into this band in pass 3.
     // clearRect is needed because fillRect composites rather than replaces,
     // so transparent/translucent backgrounds wouldn't clear previous content.
-    this.ctx.clearRect(0, lineY, lineWidth, this.metrics.height);
+    this.ctx.clearRect(0, top, right, bottom - top);
     this.ctx.fillStyle = this.theme.background;
-    this.ctx.fillRect(0, lineY, lineWidth, this.metrics.height);
+    this.ctx.fillRect(0, top, right, bottom - top);
 
     // PASS 1: Draw all cell backgrounds first
     // This ensures all backgrounds are painted before any text, allowing text
@@ -568,11 +592,39 @@ export class CanvasRenderer {
     for (let x = 0; x < line.length; x++) {
       const cell = line[x];
       if (cell.width === 0) continue; // Skip spacer cells for wide characters
-      this.renderCellBackground(cell, x, y);
+      this.renderCellBackground(cell, x, y, top, bottom);
     }
+
+    // Text is clipped to the band (device pixels, edges shared with the
+    // neighbouring bands). Ink reaching into another band is drawn when that
+    // band is painted, so anti-aliased ink is never composited twice. The same
+    // clipped draws happen in every frame: a clip can also suppress a glyph
+    // whose only ink inside it is an anti-aliased fringe, so an unclipped full
+    // redraw could not be reproduced exactly by a clipped partial one.
+    this.ctx.beginPath();
+    this.ctx.rect(0, top, right, bottom - top);
+    this.ctx.clip();
+    this.ctx.setTransform(this.devicePixelRatio, 0, 0, this.devicePixelRatio, 0, 0);
 
     // PASS 2: Draw all cell text and decorations
     // Now text can safely extend beyond cell boundaries (for complex scripts)
+    this.renderLineText(line, y);
+
+    // PASS 3: Tall glyphs of the row below that reach up into this band.
+    // (Downward overflow is not drawn: a top-to-bottom repaint always erased it.)
+    const below = this.frameLine?.(y + 1);
+    if (below) {
+      for (let x = 0; x < below.length; x++) {
+        const cell = below[x];
+        if (cell.width === 0 || !this.mayReachRowAbove(cell, x, y + 1)) continue;
+        this.renderCellText(cell, x, y + 1);
+      }
+    }
+    this.ctx.restore();
+  }
+
+  /** Draw a line's text and decorations (pass 2), in CSS pixels. */
+  private renderLineText(line: GhosttyCell[], y: number): void {
     for (let x = 0; x < line.length; x++) {
       const cell = line[x];
       if (cell.width === 0) continue; // Skip spacer cells for wide characters
@@ -581,14 +633,77 @@ export class CanvasRenderer {
   }
 
   /**
+   * Device-pixel position of a column boundary. Adjacent fills share the same
+   * rounded edge, so they meet without a gap or overlap at fractional DPRs.
+   */
+  private deviceX(col: number): number {
+    return Math.round(col * this.metrics.width * this.devicePixelRatio);
+  }
+
+  /** Device-pixel position of a row boundary (see deviceX). */
+  private deviceY(row: number): number {
+    return Math.round(row * this.metrics.height * this.devicePixelRatio);
+  }
+
+  /** CSS font for a cell's style. */
+  private cellFont(cell: GhosttyCell): string {
+    let fontStyle = '';
+    if (cell.flags & CellFlags.ITALIC) fontStyle += 'italic ';
+    if (cell.flags & CellFlags.BOLD) fontStyle += 'bold ';
+    return `${fontStyle}${this.fontSize}px ${this.fontFamily}`;
+  }
+
+  /** Text drawn for a cell: its full grapheme cluster, or its single codepoint. */
+  private cellText(cell: GhosttyCell, x: number, y: number): string {
+    if (cell.grapheme_len > 0 && this.currentBuffer?.getGraphemeString) {
+      // Cell has additional codepoints - get full grapheme cluster
+      return this.currentBuffer.getGraphemeString(y, x);
+    }
+    // Simple cell - single codepoint
+    return String.fromCodePoint(cell.codepoint || 32); // Default to space if null
+  }
+
+  /**
+   * Whether a cell's glyph may reach above its own row band: its measured ink
+   * ascent (cached per font and text) plus a margin for hinting, synthetic bold
+   * and anti-aliasing exceeds the baseline offset. This only limits which cells
+   * pass 3 redraws; it is evaluated identically in every frame.
+   */
+  private mayReachRowAbove(cell: GhosttyCell, x: number, y: number): boolean {
+    if (cell.flags & CellFlags.INVISIBLE) return false;
+    if ((cell.codepoint === 0 || cell.codepoint === 32) && cell.grapheme_len === 0) return false;
+    const font = this.cellFont(cell);
+    const text = this.cellText(cell, x, y);
+    const key = `${font}\n${text}`;
+    let ascent = this.inkAscents.get(key);
+    if (ascent === undefined) {
+      if (this.inkAscents.size >= 4096) this.inkAscents.clear();
+      this.ctx.font = font;
+      const measured = this.ctx.measureText(text).actualBoundingBoxAscent;
+      // Without ink metrics, assume the glyph may overflow.
+      ascent = Number.isFinite(measured) ? measured : Number.POSITIVE_INFINITY;
+      this.inkAscents.set(key, ascent);
+    }
+    const margin = 1 / this.devicePixelRatio + this.fontSize / 16;
+    return ascent + margin > this.metrics.baseline;
+  }
+
+  /**
    * Render a cell's background only (Pass 1 of two-pass rendering)
    * Selection highlighting is integrated here to avoid z-order issues with
    * complex glyphs (like Devanagari) that extend outside their cell bounds.
+   * Draws in device pixels: the caller has set an identity transform and passes
+   * the row band's device-pixel edges.
    */
-  private renderCellBackground(cell: GhosttyCell, x: number, y: number): void {
-    const cellX = x * this.metrics.width;
-    const cellY = y * this.metrics.height;
-    const cellWidth = this.metrics.width * cell.width;
+  private renderCellBackground(
+    cell: GhosttyCell,
+    x: number,
+    y: number,
+    top: number,
+    bottom: number
+  ): void {
+    const left = this.deviceX(x);
+    const width = this.deviceX(x + cell.width) - left;
 
     // Check if this cell is selected
     const isSelected = this.isInSelection(x, y);
@@ -596,7 +711,7 @@ export class CanvasRenderer {
     if (isSelected) {
       // Draw selection background (solid color, not overlay)
       this.ctx.fillStyle = this.theme.selectionBackground;
-      this.ctx.fillRect(cellX, cellY, cellWidth, this.metrics.height);
+      this.ctx.fillRect(left, top, width, bottom - top);
       return; // Selection background replaces cell background
     }
 
@@ -621,7 +736,7 @@ export class CanvasRenderer {
       cell.bg_default === undefined ? black : !inverse && cell.bg_default && black;
     if (!isDefaultBg) {
       this.ctx.fillStyle = this.rgbToCSS(bg_r, bg_g, bg_b);
-      this.ctx.fillRect(cellX, cellY, cellWidth, this.metrics.height);
+      this.ctx.fillRect(left, top, width, bottom - top);
     }
   }
 
@@ -643,10 +758,7 @@ export class CanvasRenderer {
     const isSelected = this.isInSelection(x, y);
 
     // Set text style
-    let fontStyle = '';
-    if (cell.flags & CellFlags.ITALIC) fontStyle += 'italic ';
-    if (cell.flags & CellFlags.BOLD) fontStyle += 'bold ';
-    this.ctx.font = `${fontStyle}${this.fontSize}px ${this.fontFamily}`;
+    this.ctx.font = this.cellFont(cell);
 
     // Set text color - use override, selection foreground, or normal color
     if (colorOverride) {
@@ -679,15 +791,7 @@ export class CanvasRenderer {
     const textY = cellY + this.metrics.baseline;
 
     // Get the character to render - use grapheme lookup for complex scripts
-    let char: string;
-    if (cell.grapheme_len > 0 && this.currentBuffer?.getGraphemeString) {
-      // Cell has additional codepoints - get full grapheme cluster
-      char = this.currentBuffer.getGraphemeString(y, x);
-    } else {
-      // Simple cell - single codepoint
-      char = String.fromCodePoint(cell.codepoint || 32); // Default to space if null
-    }
-    this.ctx.fillText(char, textX, textY);
+    this.ctx.fillText(this.cellText(cell, x, y), textX, textY);
 
     // Reset alpha
     if (cell.flags & CellFlags.FAINT) {
@@ -761,46 +865,53 @@ export class CanvasRenderer {
     y: number,
     style: 'block' | 'bar' | 'underline' = this.cursorStyle
   ): void {
-    const cursorX = x * this.metrics.width;
-    const cursorY = y * this.metrics.height;
+    // The cursor is drawn over the frame every render, so its edges are snapped
+    // to device pixels like the backgrounds: repeated draws stay identical and
+    // never blend into a neighbouring cell or row band.
+    const dpr = this.devicePixelRatio;
+    const left = this.deviceX(x);
+    const right = this.deviceX(x + 1);
+    const top = this.deviceY(y);
+    const bottom = this.deviceY(y + 1);
 
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = this.theme.cursor;
 
     switch (style) {
       case 'block':
         // Full cell block
-        this.ctx.fillRect(cursorX, cursorY, this.metrics.width, this.metrics.height);
+        this.ctx.fillRect(left, top, right - left, bottom - top);
         // Re-draw character under cursor with cursorAccent color
         {
           const line = this.currentBuffer?.getLine(y);
           if (line?.[x]) {
-            this.ctx.save();
             this.ctx.beginPath();
-            this.ctx.rect(cursorX, cursorY, this.metrics.width, this.metrics.height);
+            this.ctx.rect(left, top, right - left, bottom - top);
             this.ctx.clip();
+            this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             this.renderCellText(line[x], x, y, this.theme.cursorAccent);
-            this.ctx.restore();
           }
         }
         break;
 
-      case 'underline':
+      case 'underline': {
         // Underline at bottom of cell
         const underlineHeight = Math.max(2, Math.floor(this.metrics.height * 0.15));
-        this.ctx.fillRect(
-          cursorX,
-          cursorY + this.metrics.height - underlineHeight,
-          this.metrics.width,
-          underlineHeight
-        );
+        const underlineTop = Math.round(((y + 1) * this.metrics.height - underlineHeight) * dpr);
+        this.ctx.fillRect(left, underlineTop, right - left, bottom - underlineTop);
         break;
+      }
 
-      case 'bar':
+      case 'bar': {
         // Vertical bar at left of cell
         const barWidth = Math.max(2, Math.floor(this.metrics.width * 0.15));
-        this.ctx.fillRect(cursorX, cursorY, barWidth, this.metrics.height);
+        const barRight = Math.round((x * this.metrics.width + barWidth) * dpr);
+        this.ctx.fillRect(left, top, barRight - left, bottom - top);
         break;
+      }
     }
+    this.ctx.restore();
   }
 
   // ==========================================================================
@@ -860,6 +971,7 @@ export class CanvasRenderer {
   public setFontSize(size: number): void {
     this.fontSize = size;
     this.metrics = this.measureFont();
+    this.inkAscents.clear();
   }
 
   /**
@@ -868,6 +980,7 @@ export class CanvasRenderer {
   public setFontFamily(family: string): void {
     this.fontFamily = family;
     this.metrics = this.measureFont();
+    this.inkAscents.clear();
   }
 
   /**
