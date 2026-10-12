@@ -645,9 +645,18 @@ export class Terminal implements ITerminalCore {
       return;
     }
 
+    if (this.wasmTerm!.backend === 'libghostty-vt') {
+      const bytes = this.wasmTerm!.encodePaste(data);
+      if (bytes.length) {
+        this.awaitingEcho = true;
+        this.dataEmitter.fire(new TextDecoder().decode(bytes));
+      }
+      return;
+    }
+
     this.awaitingEcho = true;
 
-    // Check if terminal has bracketed paste mode enabled
+    // Legacy retains its existing bracketed-paste behavior.
     if (this.wasmTerm!.hasBracketedPaste()) {
       // Wrap with bracketed paste sequences (DEC mode 2004)
       this.dataEmitter.fire('\x1b[200~' + data + '\x1b[201~');

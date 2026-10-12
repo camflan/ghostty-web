@@ -88,6 +88,27 @@ rtest('input.layout-text-and-copy-remain-browser-safe', async (ctx) => {
   ctx.checks.equal('text-once-without-copy-bytes', (await term.events()).data.join(''), 'aA!é😀');
 });
 
+rtest('paste.clipboard-native-sanitization-and-mode-transitions', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 3 });
+  await term.clickCell(1, 1);
+  await ctx.harness.page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const text = 'é\u0003\nend\u001b[201~';
+  await ctx.harness.page.evaluate((value) => navigator.clipboard.writeText(value), text);
+  for (const bracketed of [false, true, false]) {
+    await term.writeAndSettle(bracketed ? '\x1b[?2004h' : '\x1b[?2004l');
+    await term.clearEvents();
+    await ctx.harness.page.keyboard.press('Control+v');
+    await ctx.harness.page.waitForFunction(
+      (id) => window.__ghosttyRegression.events(id).data.length > 0,
+      term.id
+    );
+    await ctx.harness.frame();
+    ctx.checks.equal(`clipboard-${bracketed ? 'bracketed' : 'plain'}`, (await term.events()).data, [
+      bracketed ? '\x1b[200~é \nend [201~\x1b[201~' : 'é \rend [201~',
+    ]);
+  }
+});
+
 rtest('focus.reports-blur-and-focus-when-1004-set', async (ctx) => {
   const term = await ctx.harness.create({ cols: 10, rows: 3 });
   await term.writeAndSettle('\x1b[?1004h');

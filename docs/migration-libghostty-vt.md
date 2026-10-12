@@ -260,6 +260,33 @@ copied `TMUX_LINE` locally with no mouse reports sent to the PTY. No page error 
 WASM trap was recorded. Browser, private tmux server and demo services were stopped.
 Real trackpad acceleration and other browser/platform manual gates remain unverified.
 
+## Post-mouse slice: terminal-aware native paste
+
+`Terminal.paste()`, clipboard paste and `beforeinput` paste now share upstream
+`ghostty_terminal_paste()`. The bridge supplies one `text/plain` representation;
+Ghostty reads live mode 2004, sanitizes its control-byte list and supplies framing
+or LF-to-CR conversion. CRLF becomes CRCR when unbracketed, matching the pinned
+upstream encoder rather than adding host normalization. Browser event deduplication
+still compares the original clipboard text. Legacy and standalone input handlers
+retain their existing behavior.
+
+The existing public policy permits multiline paste without prompting, so the
+bridge explicitly passes `allow_unsafe=true`. This is **not** a command-injection
+confirmation feature: newlines can still execute commands in an unbracketed shell.
+Upstream still neutralizes embedded bracketed-paste terminators by replacing ESC
+with a space. Clipboard-read callbacks remain disabled; no Kitty clipboard grant,
+new browser permission request or clipboard protocol is enabled.
+
+Native output chunks are copied immediately into a separate paste capture, then
+emitted as one UTF-8 string. Pending terminal replies are neither consumed nor
+mixed into the paste, and no user callback runs inside the native paste operation.
+Empty paste emits nothing; disabled stdin still suppresses host input. Ten bridge
+and six DOM/public-API tests cover live mode changes, all host paste routes,
+Unicode across native chunks and memory growth, reply isolation, failure recovery,
+and reentrant host listeners. A trusted Chromium clipboard case checks sanitization
+and mode transitions. Three core gaps and the browser newline gap pass their
+original assertions and become required on native; legacy failures remain explicit.
+
 ## Commands
 
 ```bash

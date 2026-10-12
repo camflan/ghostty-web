@@ -27,10 +27,10 @@
     },
     {
       "id": "api.paste-unbracketed-converts-newlines",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-12 [js-layer]: paste() sends text verbatim when 2004 is off; Ghostty's paste encoder maps LF to CR. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "reason": "Legacy-only gap; native terminal-aware paste passes the unchanged assertion. IN-12 [js-layer]: paste() sends text verbatim when 2004 is off; Ghostty's paste encoder maps LF to CR. (provenance: tests/gaps/browser/history/known-failures.json)"
     },
     {
       "id": "api.dispose-removes-dom",
@@ -684,6 +684,13 @@
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
       "unsupported": []
+    },
+    {
+      "id": "paste.clipboard-native-sanitization-and-mode-transitions",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy clipboard paste forwards control bytes and LF verbatim instead of using native paste sanitization and newline conversion."
     }
   ]
 }

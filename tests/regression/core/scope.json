@@ -762,24 +762,24 @@
     },
     {
       "id": "paste.unbracketed-newline-to-cr",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-12 (js-layer, gap on both engines): Unbracketed paste is sent verbatim; native maps LF to CR"
+      "reason": "Legacy-only gap; native terminal-aware paste now passes the unchanged assertion. WEB-12 (js-layer, legacy gap): Unbracketed paste is sent verbatim; native maps LF to CR"
     },
     {
       "id": "paste.unbracketed-control-bytes",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-12 (js-layer, gap on both engines): Paste does not replace control bytes with spaces (current paste.encode strip list)"
+      "reason": "Legacy-only gap; native terminal-aware paste now passes the unchanged assertion. IN-12 (js-layer, legacy gap): Paste does not replace control bytes with spaces (current paste.encode strip list)"
     },
     {
       "id": "paste.bracketed-end-marker-neutralised",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-12 (js-layer, gap on both engines): An embedded ESC[201~ terminates bracketed paste early (ESC is not stripped)"
+      "reason": "Legacy-only gap; native terminal-aware paste now passes the unchanged assertion. IN-12 (js-layer, legacy gap): An embedded ESC[201~ terminates bracketed paste early (ESC is not stripped)"
     },
     {
       "id": "focus.mode-readable",

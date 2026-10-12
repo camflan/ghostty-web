@@ -1217,6 +1217,14 @@ export class InputHandler {
    * Emit paste data with bracketed paste support
    */
   private emitPasteData(text: string): void {
+    const terminal = this.nativeTerminal();
+    if (terminal) {
+      // Upstream owns sanitization, newline conversion and live mode-2004 framing.
+      // Keep DOM paste/beforeinput deduplication on the original clipboard text.
+      const bytes = terminal.encodePaste(text);
+      if (bytes.length) this.onDataCallback(new TextDecoder().decode(bytes));
+      return;
+    }
     const hasBracketedPaste = this.getModeCallback?.(2004) ?? false;
 
     if (hasBracketedPaste) {
