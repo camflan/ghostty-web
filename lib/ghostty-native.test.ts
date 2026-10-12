@@ -1526,6 +1526,42 @@ describe('libghostty-vt render hold (synchronized output)', () => {
     });
   });
 
+  test('the frame survives alt-screen switches, scrolling output and later write chunks', () => {
+    held((t) => {
+      t.write('primary\x1b[?2026h\x1b[?1049h\x1b[Halt');
+      expect(row(t.getPresentation(), 0)).toBe('primary');
+      expect(row(t, 0)).toBe('alt');
+      t.write('\x1b[?1049l');
+      for (let i = 0; i < 20; i++) t.write(`\r\n${i}`);
+      expect(t.getScrollbackLength()).toBeGreaterThan(0);
+      expect([0, 1, 2].map((y) => row(t.getPresentation(), y))).toEqual(['primary', '', '']);
+      t.write('\x1b[?2026l');
+      // A hold that starts in a later 64 KiB chunk of one write is still exact.
+      t.write(`${'x'.repeat(70 * 1024)}\x1b[2J\x1b[Hbefore\x1b[?2026h\x1b[Hafter!`);
+      expect(row(t.getPresentation(), 0)).toBe('before');
+      expect(row(t, 0)).toBe('after!');
+    });
+  });
+
+  test('wide cells, hyperlinks and flags are captured; replies flow through a long hold', () => {
+    held((t) => {
+      t.write('\x1b]8;;https://a.example\x07漢\x1b]8;;\x07\x1b[1;4mB\x1b[0m\x1b[?2026h\x1b[H  xx');
+      const [wide, spacer, bold] = t.getPresentation().getLine(0)!;
+      expect([wide.width, spacer.width, wide.hyperlink_id > 0]).toEqual([2, 0, true]);
+      expect(bold.flags & (CellFlags.BOLD | CellFlags.UNDERLINE)).toBe(
+        CellFlags.BOLD | CellFlags.UNDERLINE
+      );
+      expect(t.getLine(0)![0].hyperlink_id).toBe(0);
+      const replies: string[] = [];
+      for (let i = 0; i < 200; i++) {
+        t.write(`\x1b[2;1H${i}\x1b[6n`);
+        replies.push(...drain(t));
+      }
+      expect([replies.length, replies.at(-1)]).toEqual([200, '\x1b[2;4R']);
+      expect(row(t.getPresentation(), 0)).toBe('漢B');
+    });
+  });
+
   test('two terminals hold independently; freeing during a hold is clean', () => {
     const g = fresh();
     const a = g.createTerminal(6, 1);
