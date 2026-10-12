@@ -72,6 +72,40 @@ rtest('mouse.drag-selects-text-and-highlights', async (ctx) => {
   );
 });
 
+rtest('mouse.shift-drag-selects-locally-with-tracking', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 10 });
+  await term.writeAndSettle(`\x1b[5;1Hhello world\x1b[?1002h\x1b[?1006h`);
+  await term.clearEvents();
+  const from = await term.cellCenter(4, 0);
+  const to = await term.cellCenter(4, 4);
+  await ctx.harness.page.keyboard.down('Shift');
+  await ctx.harness.page.mouse.move(from.x, from.y);
+  await ctx.harness.page.mouse.down();
+  await ctx.harness.page.mouse.move(to.x, to.y, { steps: 4 });
+  await ctx.harness.page.mouse.up();
+  await ctx.harness.page.keyboard.up('Shift');
+  await term.settle();
+  ctx.checks.equal('shift-selection', await term.selection(), 'hello');
+  ctx.checks.equal('no-application-input', (await term.events()).data, []);
+});
+
+rtest('mouse.tracking-drag-does-not-select-locally', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 10 });
+  await term.writeAndSettle(`\x1b[5;1Hhello world\x1b[?1002h\x1b[?1006h`);
+  await term.clearEvents();
+  const from = await term.cellCenter(4, 0);
+  const to = await term.cellCenter(4, 4);
+  await ctx.harness.page.mouse.move(from.x, from.y);
+  await ctx.harness.page.mouse.down();
+  await ctx.harness.page.mouse.move(to.x, to.y, { steps: 4 });
+  await ctx.harness.page.mouse.up();
+  await term.settle();
+  const data = (await term.events()).data;
+  ctx.checks.equal('no-local-selection', await term.selection(), '');
+  ctx.checks.equal('press', data[0], '\x1b[<0;1;5M');
+  ctx.checks.equal('release', data.at(-1), '\x1b[<0;5;5m');
+});
+
 rtest('mouse.drag-selects-wide-characters', async (ctx) => {
   const term = await dragSelect(ctx, '\u4e00\u4e8c\u4e09x', 5);
   ctx.checks.equal('selection-text', await term.selection(), '\u4e00\u4e8c\u4e09');

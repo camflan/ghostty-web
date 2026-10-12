@@ -14,6 +14,7 @@
  * - Legacy/standalone handlers retain their compatibility encoding path.
  */
 
+import type { NativeMouseEvent } from './backends/types';
 import type { Ghostty, GhosttyTerminal } from './ghostty';
 import type { KeyEncoder } from './ghostty';
 import type { IKeyEvent } from './interfaces';
@@ -210,6 +211,8 @@ export interface MouseTrackingConfig {
   hasMouseTracking: () => boolean;
   /** Check if SGR extended mouse mode is enabled (mode 1006) */
   hasSgrMouseMode: () => boolean;
+  /** Host-owned controls or disabled stdin temporarily exclude application input. */
+  isReportingEnabled?: () => boolean;
   /** Get cell dimensions for pixel to cell conversion */
   getCellDimensions: () => { width: number; height: number };
   /** Get canvas/container offset for accurate position calculation */
@@ -245,7 +248,25 @@ export class InputHandler {
   private wheelListener: ((e: WheelEvent) => void) | null = null;
   private isComposing = false;
   private isDisposed = false;
-  private mouseButtonsPressed = 0; // Track which buttons are pressed for motion reporting
+  private mouseButtonsPressed = 0; // Legacy button tracking
+  private nativeMouseButtons = 0; // DOM buttons bitmask, presses forwarded to the application
+  private localMouseButtons = 0; // Gestures that began as local/Shift selection
+  private readonly mouseTextDecoder = new TextDecoder('utf-8', { fatal: true });
+  private readonly handleOutsideMouseMove = (event: MouseEvent): void => {
+    if (
+      (this.nativeMouseButtons || this.localMouseButtons) &&
+      !this.container.contains(event.target as Node)
+    )
+      this.handleMouseMove(event);
+  };
+  private readonly handleOutsideMouseUp = (event: MouseEvent): void => {
+    if (
+      (this.nativeMouseButtons || this.localMouseButtons) &&
+      !this.container.contains(event.target as Node)
+    )
+      this.handleMouseUp(event);
+  };
+  private readonly handleMouseBlur = (): void => this.resetMouseState();
   private lastKeyDownData: string | null = null;
   private lastKeyDownTime = 0;
   private lastPasteData: string | null = null;
@@ -371,6 +392,12 @@ export class InputHandler {
 
     this.wheelListener = this.handleWheel.bind(this);
     this.container.addEventListener('wheel', this.wheelListener, { passive: false });
+    // A native application drag owns its eventual release even outside the canvas.
+    if (this.getTerminalCallback) {
+      document.addEventListener('mousemove', this.handleOutsideMouseMove, true);
+      document.addEventListener('mouseup', this.handleOutsideMouseUp, true);
+      window.addEventListener('blur', this.handleMouseBlur);
+    }
   }
 
   /**
@@ -957,11 +984,114 @@ export class InputHandler {
     this.onDataCallback(sequence);
   }
 
+  /** Reset host gesture ownership and native motion history after blur/reset. */
+  resetMouseState(): void {
+    this.nativeMouseButtons = this.localMouseButtons = 0;
+    this.nativeTerminal()?.resetMouseEncoder();
+  }
+
+  private mouseButtonMask(button: number): number {
+    return [1, 4, 2, 8, 16][button] ?? 0;
+  }
+
+  private nativeMouseButton(button: number): NativeMouseEvent['button'] {
+    return (['left', 'middle', 'right', 'eight', 'nine'] as const)[button] ?? null;
+  }
+
+  private nativeMotionButton(buttons: number): NativeMouseEvent['button'] {
+    if (buttons & 1) return 'left';
+    if (buttons & 2) return 'right';
+    if (buttons & 4) return 'middle';
+    if (buttons & 8) return 'eight';
+    if (buttons & 16) return 'nine';
+    return null;
+  }
+
+  private nativeMouseEnabled(): boolean {
+    return this.mouseConfig?.isReportingEnabled?.() ?? true;
+  }
+
+  private sendNativeMouse(
+    event: MouseEvent,
+    action: NativeMouseEvent['action'],
+    button: NativeMouseEvent['button'],
+    anyButtonPressed: boolean
+  ): boolean {
+    const terminal = this.nativeTerminal();
+    if (!terminal || !this.mouseConfig) return false;
+    const { width, height } = this.mouseConfig.getCellDimensions();
+    if (width <= 0 || height <= 0) return false;
+    const offset = this.mouseConfig.getCanvasOffset();
+    let mods = Mods.NONE;
+    if (event.shiftKey) mods |= Mods.SHIFT;
+    if (event.ctrlKey) mods |= Mods.CTRL;
+    if (event.altKey) mods |= Mods.ALT;
+    if (event.metaKey) mods |= Mods.SUPER;
+    const bytes = terminal.encodeMouseEvent({
+      action,
+      button,
+      mods,
+      anyButtonPressed,
+      x: event.clientX - offset.left,
+      y: event.clientY - offset.top,
+      cellWidth: width,
+      cellHeight: height,
+    });
+    if (!bytes.length) return false;
+    let text: string;
+    try {
+      text = this.mouseTextDecoder.decode(bytes);
+    } catch {
+      // Classic X10 high-bit coordinates/buttons need a binary PTY channel.
+      // onData is UTF-8 text: do not send replacement characters or double-encode
+      // raw bytes as Latin-1. SGR/URXVT/pixels and UTF8 mouse formats are lossless.
+      return false;
+    }
+    this.onDataCallback(text);
+    return true;
+  }
+
+  /** Called by Terminal's capture-phase wheel router, after custom host policy. */
+  handleNativeWheel(event: WheelEvent): boolean {
+    if (this.isDisposed || !this.nativeTerminal() || !this.mouseConfig?.hasMouseTracking())
+      return false;
+    // Tracking owns the event, even when mode 9 encodes no wheels or stdin is disabled.
+    if (!this.nativeMouseEnabled()) return true;
+    const held = (event.buttons & this.nativeMouseButtons) !== 0;
+    // Preserve the web contract: one report per nonzero axis per DOM wheel event.
+    // Delta-to-lines/trackpad acceleration is host policy, not reimplemented here.
+    if (Number.isFinite(event.deltaY) && event.deltaY !== 0) {
+      this.sendNativeMouse(event, 'press', event.deltaY < 0 ? 'four' : 'five', held);
+    }
+    if (Number.isFinite(event.deltaX) && event.deltaX !== 0) {
+      this.sendNativeMouse(event, 'press', event.deltaX < 0 ? 'six' : 'seven', held);
+    }
+    event.preventDefault();
+    return true;
+  }
+
   /**
    * Handle mousedown event
    */
   private handleMouseDown(event: MouseEvent): void {
     if (this.isDisposed) return;
+    if (this.nativeTerminal() && this.mouseConfig) {
+      const mask = this.mouseButtonMask(event.button);
+      if (!mask) return;
+      if (event.shiftKey || !this.nativeMouseEnabled() || !this.mouseConfig.hasMouseTracking()) {
+        this.localMouseButtons |= mask;
+        this.nativeMouseButtons &= ~mask;
+        return;
+      }
+      this.localMouseButtons &= ~mask;
+      this.nativeMouseButtons |= mask;
+      if (!this.sendNativeMouse(event, 'press', this.nativeMouseButton(event.button), true)) {
+        // A dropped/unsafe press must not create an orphan release later.
+        this.nativeMouseButtons &= ~mask;
+      }
+      event.preventDefault();
+      return;
+    }
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     const cell = this.pixelToCell(event);
@@ -987,6 +1117,23 @@ export class InputHandler {
    */
   private handleMouseUp(event: MouseEvent): void {
     if (this.isDisposed) return;
+    if (this.nativeTerminal() && this.mouseConfig) {
+      const mask = this.mouseButtonMask(event.button);
+      const forwarded = (this.nativeMouseButtons & mask) !== 0;
+      this.nativeMouseButtons &= ~mask;
+      this.localMouseButtons &= ~mask;
+      // Pair an application press with release even if Shift changed mid-drag.
+      if (forwarded && this.nativeMouseEnabled()) {
+        this.sendNativeMouse(
+          event,
+          'release',
+          this.nativeMouseButton(event.button),
+          (event.buttons & this.nativeMouseButtons) !== 0
+        );
+        event.preventDefault();
+      }
+      return;
+    }
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     const cell = this.pixelToCell(event);
@@ -1005,6 +1152,21 @@ export class InputHandler {
    */
   private handleMouseMove(event: MouseEvent): void {
     if (this.isDisposed) return;
+    if (this.nativeTerminal() && this.mouseConfig) {
+      // DOM button state also repairs ownership after a release missed during blur.
+      this.nativeMouseButtons &= event.buttons;
+      this.localMouseButtons &= event.buttons;
+      if (
+        this.localMouseButtons ||
+        !this.nativeMouseEnabled() ||
+        !this.mouseConfig.hasMouseTracking()
+      )
+        return;
+      if (event.shiftKey && event.buttons !== 0 && !this.nativeMouseButtons) return;
+      const button = this.nativeMotionButton(this.nativeMouseButtons);
+      this.sendNativeMouse(event, 'motion', button, this.nativeMouseButtons !== 0);
+      return;
+    }
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     // Check if button motion mode or any-event tracking is enabled
@@ -1036,6 +1198,7 @@ export class InputHandler {
    */
   private handleWheel(event: WheelEvent): void {
     if (this.isDisposed) return;
+    if (this.handleNativeWheel(event)) return;
     if (!this.mouseConfig?.hasMouseTracking()) return;
 
     const cell = this.pixelToCell(event);
@@ -1245,6 +1408,13 @@ export class InputHandler {
       this.container.removeEventListener('wheel', this.wheelListener);
       this.wheelListener = null;
     }
+
+    if (this.getTerminalCallback) {
+      document.removeEventListener('mousemove', this.handleOutsideMouseMove, true);
+      document.removeEventListener('mouseup', this.handleOutsideMouseUp, true);
+      window.removeEventListener('blur', this.handleMouseBlur);
+    }
+    this.resetMouseState();
 
     // Release the WASM key encoder owned by this handler
     this.encoder.dispose();

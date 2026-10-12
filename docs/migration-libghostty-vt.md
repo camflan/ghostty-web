@@ -41,10 +41,11 @@ Native replies are copied immediately out of callbacks and drained in order;
 clipboard-read callbacks are not enabled. Host integration supplies real CSS cell
 metrics for size reports, consumes native cursor defaults/styles and explicit
 color metadata, and uses terminal-derived native keyboard options for ordinary
-keys as well as Kitty mode. Existing browser clipboard/shortcut policy remains in
-JavaScript. Structured title/bell effects, complete mouse encoding, native
-selection, synchronized-output presentation and other improvements remain later
-work rather than being mixed into this bridge replacement.
+keys as well as Kitty mode. Native mouse events now use Ghostty's mouse encoder;
+the browser retains gesture ownership, wheel granularity and the string transport
+boundary (see the mouse slice below). Browser clipboard/shortcut policy remains in
+JavaScript. Structured title/bell effects, native selection, synchronized-output
+presentation and other improvements remain later work.
 
 ## Scrollback contract: native retention
 
@@ -94,16 +95,16 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including the post-checkpoint native keyboard slice, was validated on
+The required baseline, including the post-checkpoint native keyboard and mouse slices, was validated on
 **2026-10-12**:
 
-- **808 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **299 native / 274 legacy passes** (241 / 216 behavior cases plus
+- **835 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core: **307 native / 274 legacy passes** (249 / 216 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **88 native / 78 legacy passes**, zero skips, retries or flaky
+- Required browser: **91 native / 79 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
-- Opt-in core gaps: **27 native / 54 legacy failures**. Opt-in browser gaps:
-  **19 native / 29 legacy failures**. Every gap run exited **1**; these are open
+- Opt-in core gaps: **19 native / 54 legacy failures**. Opt-in browser gaps:
+  **18 native / 30 legacy failures**. Every gap run exited **1**; these are open
   defects/parity requirements, not passing regression coverage. Counts across
   lanes overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
@@ -206,6 +207,58 @@ KeyboardEvent does not supply a complete unshifted layout map, and the adapter's
 numeric/shifted-punctuation fallback is necessarily best-effort. This slice does
 not change mouse/wheel encoding, paste sanitization, focus reporting, selection,
 rendering, the WASM pin, or reviewed visual baselines.
+
+## Post-checkpoint slice: native mouse routing
+
+The native backend owns a persistent, manifest-resolved mouse encoder and reusable
+event/output storage. The host supplies canvas-relative CSS coordinates, geometry,
+buttons and modifiers; Ghostty selects the live tracking mode and protocol format,
+clamps or drops out-of-view events, and deduplicates motion by cell. The tracking
+probe uses a separate encoder so it cannot disturb input deduplication. Mode
+synchronization is lazy after writes, not repeated for every DOM event; a write
+currently resets motion history before the next event, even for ordinary output.
+Resize/metric changes and explicit resets also clear that history.
+
+Application tracking now precedes local history scrolling and alternate-screen
+arrow fallback. Each nonzero wheel axis produces one native press per DOM event,
+preserving the existing web reporting granularity rather than introducing native
+trackpad acceleration. Custom wheel handlers retain precedence; disabled stdin and
+scrollbar drags remain host-owned. With tracking off, existing history scrolling
+and alternate-screen arrow behavior are unchanged.
+
+Shift-started button gestures remain local selection even if Shift is released
+mid-drag. Application-owned presses retain their release if Shift changes, including
+release outside the canvas. Blur/reset/disposal clear gesture ownership. Tracked
+clicks do not activate local hyperlinks or the local context menu; Shift bypasses
+that policy. The upstream XTSHIFTESCAPE override is not exposed by this C API, so
+this slice implements the default host Shift-selection policy, not that override.
+Legacy input encoding/routing is unchanged.
+
+**The PTY API is still string-only.** SGR, URXVT, SGR-pixels and UTF8 mouse formats
+can be decoded losslessly. Classic X10 reports containing invalid UTF-8 high-bit
+bytes are withheld rather than corrupted or double-encoded; a withheld press does
+not create an orphan release. The raw-byte X10 case remains an explicit failing
+gap. No `onBinary` API or transport migration is implied by this slice.
+
+Eight existing core gaps pass their unchanged assertions on native and are now
+required: Alt/Meta presses, Shift bypass, cell-motion deduplication, no-button
+motion, X10 coordinate overflow, and wheel reporting on normal/alternate screens.
+The browser wheel gap is promoted too. Ten new bridge tests and nine native DOM
+unit tests cover ABI/lifetime, formats/geometry, ownership and transport boundaries.
+Two new trusted-pointer browser cases protect Shift-local selection and suppression
+of local selection for application drags. The latter passes on both engines;
+Shift-local selection remains a reproduced legacy-only gap. No required case was
+demoted and no reviewed image changed. The Happy DOM wheel fixture explicitly
+supplies coordinates omitted by its WheelEvent implementation; desired behavior
+assertions were not changed.
+
+Live validation passed six byte-exact Chromium → WebSocket → PTY mouse probes,
+then a fresh same-session Vim/tmux smoke. Vim negotiated 1002/1006, a click landed
+at line 10/column 4, and a wheel event moved the viewport top from line 1 to line 4.
+Tmux clicks selected both panes, wheel input entered copy mode, and Shift-drag
+copied `TMUX_LINE` locally with no mouse reports sent to the PTY. No page error or
+WASM trap was recorded. Browser, private tmux server and demo services were stopped.
+Real trackpad acceleration and other browser/platform manual gates remain unverified.
 
 ## Commands
 

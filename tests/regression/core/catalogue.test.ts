@@ -22,6 +22,14 @@ const plan = scopePlan();
 // Legacy failures fixed by the native core or native host integration. They
 // must stay REQUIRED on native even though they remain legacy gaps.
 const NATIVE_FIXED = [
+  'mouse.sgr-alt-press',
+  'mouse.sgr-meta-press',
+  'mouse.shift-bypasses-reporting',
+  'mouse.motion-deduplicated-per-cell',
+  'mouse.any-motion-no-button',
+  'mouse.x10-beyond-223-dropped',
+  'mouse.wheel-reported-when-tracking',
+  'mouse.wheel-alt-screen-tracking',
   'key.alt-b',
   'key.alt-period',
   'key.ctrl-alt-c',

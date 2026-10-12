@@ -456,14 +456,23 @@ export class SelectionManager {
   // Private Methods
   // ==========================================================================
 
-  /**
-   * Attach mouse event listeners to canvas
-   */
+  /** Native tracking owns pointer input unless the host's Shift-selection policy applies. */
+  private applicationOwnsMouse(event: MouseEvent): boolean {
+    return (
+      this.wasmTerm.backend === 'libghostty-vt' &&
+      !this.terminal.options.disableStdin &&
+      this.wasmTerm.hasMouseTracking() &&
+      !event.shiftKey
+    );
+  }
+
+  /** Attach mouse event listeners to canvas. */
   private attachEventListeners(): void {
     const canvas = this.renderer.getCanvas();
 
     // Mouse down - start selection or clear existing
     this.listen(canvas, 'mousedown', (e: MouseEvent) => {
+      if (this.applicationOwnsMouse(e)) return;
       if (e.button === 0) {
         // Left click only
 
@@ -628,6 +637,7 @@ export class SelectionManager {
     // Handle click events for double-click (word) and triple-click (line) selection
     // Use event.detail which browsers set to click count (1, 2, 3, etc.)
     this.listen(canvas, 'click', (e: MouseEvent) => {
+      if (this.applicationOwnsMouse(e)) return;
       // event.detail: 1 = single, 2 = double, 3 = triple click
       if (e.detail === 2) {
         // Double-click - select word
@@ -693,6 +703,10 @@ export class SelectionManager {
     // Right-click (context menu) - position textarea to show browser's native menu
     // This allows Copy/Paste options to appear in the context menu
     this.boundContextMenuHandler = (e: MouseEvent) => {
+      if (this.applicationOwnsMouse(e)) {
+        e.preventDefault();
+        return;
+      }
       // Finish any previous menu's restore first so it cannot hide this one
       this.cancelContextMenuReset();
 

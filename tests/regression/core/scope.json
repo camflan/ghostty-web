@@ -643,24 +643,24 @@
     },
     {
       "id": "mouse.sgr-alt-press",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-08 (js-layer, gap on both engines): getMouseModifiers never adds the Alt bit (8)"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. IN-08 (js-layer, legacy gap): getMouseModifiers never adds the Alt bit (8)"
     },
     {
       "id": "mouse.sgr-meta-press",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-08 (js-layer, gap on both engines): getMouseModifiers maps Meta/Super to bit 8, which belongs to Alt"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. IN-08 (js-layer, legacy gap): getMouseModifiers maps Meta/Super to bit 8, which belongs to Alt"
     },
     {
       "id": "mouse.shift-bypasses-reporting",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-06 (js-layer, gap on both engines): No Shift override: Shift+click is reported to the application instead of being left for local selection"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. WEB-06 (js-layer, legacy gap): No Shift override: Shift+click is reported to the application instead of being left for local selection"
     },
     {
       "id": "mouse.button-motion",
@@ -676,17 +676,17 @@
     },
     {
       "id": "mouse.motion-deduplicated-per-cell",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-06 (js-layer, gap on both engines): Motion is reported for every mousemove instead of once per cell change"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. WEB-06 (js-layer, legacy gap): Motion is reported for every mousemove instead of once per cell change"
     },
     {
       "id": "mouse.any-motion-no-button",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-08 (js-layer, gap on both engines): No-button motion is encoded as 32 instead of 35 (32 + 3 for no button)"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. IN-08 (js-layer, legacy gap): No-button motion is encoded as 32 instead of 35 (32 + 3 for no button)"
     },
     {
       "id": "mouse.x10-normal-small-coords",
@@ -703,10 +703,10 @@
     },
     {
       "id": "mouse.x10-beyond-223-dropped",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-08 (js-layer, gap on both engines): X10 coordinates are clamped to 255 instead of the report being dropped beyond 223"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. IN-08 (js-layer, legacy gap): X10 coordinates are clamped to 255 instead of the report being dropped beyond 223"
     },
     {
       "id": "mouse.x10-mode9-press",
@@ -724,17 +724,17 @@
     },
     {
       "id": "mouse.wheel-reported-when-tracking",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-06 (js-layer, gap on both engines): Terminal.handleWheel (capture phase) swallows the wheel before InputHandler can report it"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. WEB-06 (js-layer, legacy gap): Terminal.handleWheel (capture phase) swallows the wheel before InputHandler can report it"
     },
     {
       "id": "mouse.wheel-alt-screen-tracking",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-06 (js-layer, gap on both engines): On the alternate screen the wheel always sends arrow keys, ignoring active mouse reporting"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. WEB-06 (js-layer, legacy gap): On the alternate screen the wheel always sends arrow keys, ignoring active mouse reporting"
     },
     {
       "id": "paste.plain-text",

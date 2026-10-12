@@ -446,6 +446,7 @@ export class Terminal implements ITerminalCore {
       const renderer = this.renderer;
       // Read the handle lazily: never capture a wrapper that could outlive it.
       const mouseConfig: MouseTrackingConfig = {
+        isReportingEnabled: () => !this.options.disableStdin && !this.isDraggingScrollbar,
         hasMouseTracking: () => this.wasmTerm?.hasMouseTracking() ?? false,
         hasSgrMouseMode: () => this.wasmTerm?.getMode(1006, false) ?? true, // SGR extended mode
         getCellDimensions: () => ({
@@ -759,6 +760,7 @@ export class Terminal implements ITerminalCore {
     this.assertOpen();
 
     // Host state first, so nothing renders against the pre-reset buffer.
+    this.inputHandler?.resetMouseState();
     this.selectionManager?.clearSelection();
     if (this.scrollAnimationFrame) {
       cancelAnimationFrame(this.scrollAnimationFrame);
@@ -1601,6 +1603,15 @@ export class Terminal implements ITerminalCore {
    * Handle mouse click for link activation
    */
   private handleClick = async (e: MouseEvent): Promise<void> => {
+    // Native-tracked clicks belong to the TUI, not local hyperlink activation.
+    if (
+      this.wasmTerm?.backend === 'libghostty-vt' &&
+      !this.options.disableStdin &&
+      this.wasmTerm.hasMouseTracking() &&
+      !e.shiftKey
+    )
+      return;
+
     // For more reliable clicking, detect the link at click time
     // rather than relying on cached hover state (avoids async races)
     if (!this.canvas || !this.renderer || !this.linkDetector || !this.wasmTerm) return;
@@ -1656,6 +1667,10 @@ export class Terminal implements ITerminalCore {
     if (this.customWheelEventHandler && this.customWheelEventHandler(e)) {
       return;
     }
+
+    // Application tracking takes precedence over local history and alternate-screen
+    // arrow fallback. The legacy backend keeps its existing routing behavior.
+    if (this.inputHandler?.handleNativeWheel(e)) return;
 
     // Check if in alternate screen mode (vim, less, htop, etc.)
     const isAltScreen = this.wasmTerm?.isAlternateScreen() ?? false;

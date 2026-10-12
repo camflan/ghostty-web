@@ -344,6 +344,13 @@ export function wheelAt(session: WebSession, col: number, row: number, deltaY: n
     bubbles: true,
     cancelable: true,
   });
+  // Happy DOM's WheelEvent omits MouseEventInit coordinates in this version.
+  // Real browsers inherit these fields; supply them so the fixture reaches the
+  // same canvas cell instead of testing an undefined/NaN pointer position.
+  Object.defineProperties(event, {
+    clientX: { value: (col - 1 + 0.5) * renderer.charWidth },
+    clientY: { value: (row - 1 + 0.5) * renderer.charHeight },
+  });
   canvas.dispatchEvent(event);
   return event;
 }

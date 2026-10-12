@@ -283,10 +283,10 @@
     },
     {
       "id": "mouse.sgr-wheel-reported-when-tracking",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-06 [js-layer]: Terminal's capture-phase wheel handler stops propagation and scrolls/ignores, so InputHandler never encodes wheel reports while mouse tracking is on. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "reason": "Legacy-only gap; native mouse encoding/routing now passes the unchanged assertion. WEB-06 [js-layer]: Terminal's capture-phase wheel handler stops propagation and scrolls/ignores, so InputHandler never encodes wheel reports while mouse tracking is on. (provenance: tests/gaps/browser/history/known-failures.json)"
     },
     {
       "id": "mouse.drag-selects-text-and-highlights",
@@ -668,6 +668,19 @@
     },
     {
       "id": "input.layout-text-and-copy-remain-browser-safe",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "mouse.shift-drag-selects-locally-with-tracking",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy reports Shift mouse presses/motions instead of leaving the gesture to local selection."
+    },
+    {
+      "id": "mouse.tracking-drag-does-not-select-locally",
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
       "unsupported": []

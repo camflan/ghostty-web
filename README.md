@@ -6,7 +6,7 @@
 
 - Migrate from xterm by changing your import: `@xterm/xterm` → `ghostty-web`
 - WASM-compiled parser from Ghostty—the same code that runs the native app
-- Zero runtime dependencies, ~400KB WASM bundle
+- Zero runtime dependencies, ~828 KiB uncompressed upstream WASM bundle
 
 Originally created for [Mux](https://github.com/coder/mux) (a desktop app for isolated, parallel agentic development), but designed to be used anywhere.
 
@@ -75,6 +75,18 @@ with terminal width and content; it is not an exact xterm.js line cap or a minim
 retention guarantee. `scrollback: 0` disables history. Buffer APIs report the rows
 actually retained. Exact xterm-style retention is deferred rather than emulated
 with a hidden JavaScript clamp.
+
+## Mouse input
+
+The native backend uses Ghostty's mouse encoder for application tracking. Hold
+Shift while starting a drag to select locally instead; without tracking, normal
+history scrolling and the existing alternate-screen wheel behavior are retained.
+
+`onData` remains a UTF-8 string channel, not a binary API. SGR, URXVT, SGR-pixels
+and UTF8 mouse reports are lossless. Classic X10 reports containing invalid UTF-8
+high-bit bytes are withheld rather than corrupted; full raw-byte X10 transport
+remains unsupported. See the [migration notes](./docs/migration-libghostty-vt.md)
+for scope and remaining limitations.
 
 ## Development
 
