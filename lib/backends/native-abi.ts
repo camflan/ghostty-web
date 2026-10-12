@@ -301,6 +301,8 @@ function resolveLayout(r: Resolver) {
       'WRITE_PTY',
       'BELL',
       'TITLE_CHANGED',
+      'RENDER_HOLD',
+      'MODE',
       'SIZE',
       'COLOR_FOREGROUND',
       'COLOR_BACKGROUND',

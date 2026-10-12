@@ -178,6 +178,16 @@ describe('libghostty-vt detection', () => {
     );
   });
 
+  test('render hold manifest entries are required', () => {
+    const instance = patchedManifest((manifest) => {
+      manifest.types.GhosttyTerminalOption.values.RENDER_HOLD = undefined;
+      manifest.types.GhosttyTerminalOption.values.MODE = undefined;
+    });
+    expect(() => new Ghostty(instance)).toThrow(
+      'missing GhosttyTerminalOption.RENDER_HOLD; missing GhosttyTerminalOption.MODE'
+    );
+  });
+
   test('bell/title manifest entries are required', () => {
     const instance = patchedManifest((manifest) => {
       manifest.types.GhosttyTerminalOption.values.BELL = undefined;
@@ -1289,5 +1299,252 @@ describe('libghostty-vt bell and title events', () => {
     } finally {
       t.free();
     }
+  });
+});
+
+describe('libghostty-vt render hold (synchronized output)', () => {
+  type View = ReturnType<GhosttyTerminal['getPresentation']>;
+  /** A row of a renderer view as text, graphemes included. */
+  const row = (v: View, y: number) =>
+    (v.getLine(y) ?? [])
+      .map((c, x) => (c.width === 0 ? '' : v.getGraphemeString!(y, x)))
+      .join('')
+      .trimEnd();
+  const fg = (v: View, y: number, x: number) => {
+    const c = v.getLine(y)![x];
+    return [c.fg_r, c.fg_g, c.fg_b];
+  };
+  /** A terminal with render holds enabled and a controllable clock. */
+  function held<T>(body: (t: GhosttyTerminal, clock: { now: number }) => T, cols = 12, rows = 3) {
+    return withTerm(cols, rows, (t) => {
+      const clock = { now: 0 };
+      (t as unknown as { clock: () => number }).clock = () => clock.now;
+      t.enableRenderHold();
+      return body(t, clock);
+    });
+  }
+
+  test('nothing is captured until enabled; enabling is idempotent', () => {
+    withTerm(10, 2, (t, g) => {
+      t.write('a\x1b[?2026hb');
+      expect(t.getPresentation()).toBe(t);
+      expect(t.getMode(2026)).toBe(true);
+      t.write('\x1b[?2026l');
+      const table = (g as unknown as { exports: { __indirect_function_table: WebAssembly.Table } })
+        .exports.__indirect_function_table;
+      t.enableRenderHold();
+      const slots = table.length;
+      t.enableRenderHold();
+      const other = g.createTerminal(4, 1);
+      other.enableRenderHold();
+      expect(table.length).toBe(slots); // one shared trampoline per instance
+      other.free();
+    });
+  });
+
+  test('a hold presents exactly the frame it began with, even later in the same write', () => {
+    held((t) => {
+      t.write('\x1b[32mg\x1b[0m');
+      const green = fg(t, 0, 0);
+      t.write('\x1b[1;1H\x1b[32mhello\x1b[0m\x1b[?2026h\x1b[1;1H\x1b[31mworld!\x1b[0m\x1b[3;2H');
+      const p = t.getPresentation();
+      expect(p).not.toBe(t);
+      expect(row(p, 0)).toBe('hello');
+      expect(fg(p, 0, 0)).toEqual(green);
+      expect(fg(t, 0, 0)).not.toEqual(green);
+      expect([p.getCursor().x, p.getCursor().y]).toEqual([5, 0]);
+      // Everything else reads the live terminal.
+      expect(row(t, 0)).toBe('world!');
+      expect([t.getCursor().x, t.getCursor().y]).toEqual([1, 2]);
+      expect(t.getMode(2026)).toBe(true);
+      t.write('\x1b[6n');
+      expect(drain(t)).toEqual(['\x1b[3;2R']);
+      // The captured frame does not follow the live terminal.
+      t.write('more');
+      expect(row(t, 2)).toBe(' more');
+      expect(row(t.getPresentation(), 2)).toBe('');
+      expect(row(t.getPresentation(), 0)).toBe('hello');
+      t.write('\x1b[?2026l');
+      expect(t.getPresentation()).toBe(t);
+    });
+  });
+
+  test('graphemes, colors and cursor come from the capture, never the live terminal', () => {
+    held((t) => {
+      const family = '👨‍👩‍👧';
+      t.write(`\x1b[6 q\x1b[38;2;1;2;3me\u0301${family}\x1b[0m\x1b]11;#102030\x07\x1b[2;3H`);
+      t.write(
+        `\x1b[?2026h\x1b[1;1H\x1b[38;2;9;9;9mx${'👍🏽'}\x1b[0m\x1b[2 q\x1b]11;#ffffff\x07\x1b[3;9H`
+      );
+      const p = t.getPresentation();
+      expect(row(p, 0)).toBe(`e\u0301${family}`);
+      expect(row(t, 0)).toBe('x👍🏽');
+      expect(p.getGraphemeString!(0, 0)).toBe('e\u0301');
+      expect(p.getGraphemeString!(0, 1)).toBe(family);
+      expect(t.getGraphemeString(0, 1)).toBe('👍🏽');
+      expect(fg(p, 0, 0)).toEqual([1, 2, 3]);
+      expect(fg(t, 0, 0)).toEqual([9, 9, 9]);
+      const bg = (v: View) => {
+        const c = v.getLine(1)![0];
+        return [c.bg_r, c.bg_g, c.bg_b];
+      };
+      expect(bg(p)).toEqual([0x10, 0x20, 0x30]);
+      expect(bg(t)).toEqual([0xff, 0xff, 0xff]);
+      expect(p.getCursor()).toMatchObject({ x: 2, y: 1, style: 'bar' });
+      expect(t.getCursor()).toMatchObject({ x: 8, y: 2, style: 'block' });
+      // Live reads after the capture (which re-decode changed rows) do not leak in.
+      for (let i = 0; i < 3; i++) t.getLine(0);
+      expect(row(t.getPresentation(), 0)).toBe(`e\u0301${family}`);
+    });
+  });
+
+  test('end/start cycles without a paint present the last completed frame', () => {
+    held((t) => {
+      t.write('A\x1b[?2026h1\x1b[?2026lB\x1b[?2026h2');
+      const first = t.getPresentation();
+      expect(row(first, 0)).toBe('A1B');
+      expect(row(t, 0)).toBe('A1B2');
+      t.write('3\x1b[?2026lC\x1b[?2026h4');
+      expect(row(t.getPresentation(), 0)).toBe('A1B23C');
+      // Repeated enables inside a hold change nothing.
+      t.write('\x1b[?2026h5\x1b[?2026h');
+      expect(row(t.getPresentation(), 0)).toBe('A1B23C');
+      t.write('\x1b[?2026l');
+      expect(row(t.getPresentation(), 0)).toBe('A1B23C45');
+    });
+  });
+
+  test('a hold is ended by reset, RIS, resize, a cell size change and release', () => {
+    held((t) => {
+      const holding = () => t.getPresentation() !== t;
+      for (const end of [
+        () => t.write('\x1b[?2026l'),
+        () => t.write('\x1bc'),
+        () => t.resize(13, 3),
+        () => t.setCellPixelSize(9, 17),
+        () => t.releaseRenderHold(),
+      ]) {
+        t.write('x\x1b[?2026hy');
+        expect(holding()).toBe(true);
+        end();
+        expect(holding()).toBe(false);
+        expect(t.getMode(2026)).toBe(false);
+      }
+      // After a release, a late reset is a no-op and a new enable starts a new hold.
+      t.write('\x1b[?2026hq');
+      t.releaseRenderHold();
+      t.write('\x1b[?2026l');
+      t.write('\x1b[1;1Hz\x1b[?2026hw');
+      expect(row(t.getPresentation(), 0).startsWith('z')).toBe(true);
+      t.releaseRenderHold();
+      t.releaseRenderHold(); // no hold: no-op
+    });
+  });
+
+  test('the timeout is checked at draw time and never extended by re-enabling', () => {
+    held((t, clock) => {
+      clock.now = 100;
+      t.write('a\x1b[?2026hb');
+      clock.now = 1099;
+      t.write('\x1b[?2026hc'); // already held: no new hold, same deadline
+      expect(t.getPresentation()).not.toBe(t);
+      clock.now = 1100;
+      expect(t.getPresentation()).toBe(t);
+      expect(t.getMode(2026)).toBe(false);
+      t.write('\x1b[?2026l'); // the program's late reset is harmless
+      expect(row(t, 0)).toBe('abc');
+      // A new hold gets a fresh deadline from the write that began it.
+      t.write('\x1b[?2026hd');
+      clock.now = 2099;
+      expect(row(t.getPresentation(), 0)).toBe('abc');
+      clock.now = 2100;
+      expect(t.getPresentation()).toBe(t);
+    });
+  });
+
+  test('DECCOLM before a hold in the same write does not trap; the size restore ends it', () => {
+    for (const cols of [80, 100]) {
+      held(
+        (t) => {
+          expect(() => t.write('\x1b[?40h\x1b[?3hX\x1b[?2026hY')).not.toThrow();
+          expect(t.getPresentation()).toBe(t);
+          expect(t.getMode(2026)).toBe(false);
+          expect(t.getLine(0)?.length).toBe(cols);
+          // DECCOLM during a hold: the restore after the write ends that hold too.
+          t.write('\x1b[?2026hZ');
+          expect(t.getPresentation()).not.toBe(t);
+          expect(() => t.write('\x1b[?3l\x1b[?3h')).not.toThrow();
+          expect(t.getPresentation()).toBe(t);
+          expect(t.getLine(0)?.length).toBe(cols);
+          // DECCOLM to the current width still switches 2026 off upstream
+          // (no callback, nothing to restore): the hold ends with it.
+          t.write(`\x1b[?3${cols === 80 ? 'l' : 'h'}\x1b[?2026hW`);
+          t.write(cols === 80 ? '\x1b[?3l' : '\x1b[?3h\x1b[?3l\x1b[?3h');
+          expect([t.getMode(2026), t.getPresentation() === t]).toEqual([false, true]);
+        },
+        cols,
+        3
+      );
+    }
+  });
+
+  test('held frames paint incrementally relative to what the canvas last showed', () => {
+    held((t) => {
+      t.write('a\r\nb');
+      expect(t.needsFullRedraw()).toBe(true);
+      t.clearDirty(); // a live paint
+      t.write('\x1b[?2026h\x1b[2;1Hc');
+      const p = t.getPresentation();
+      // Nothing changed between the live paint and the hold start.
+      expect([p.needsFullRedraw(), p.isRowDirty(0), p.isRowDirty(1)]).toEqual([
+        false,
+        false,
+        false,
+      ]);
+      expect([t.isRowDirty(0), t.isRowDirty(1)]).toEqual([false, true]);
+      p.clearDirty();
+      t.write('\x1b[?2026l');
+      // The canvas (the held frame) is current: live rows changed since are dirty.
+      expect([t.needsFullRedraw(), t.isRowDirty(0), t.isRowDirty(1)]).toEqual([false, false, true]);
+      t.clearDirty();
+
+      // A change before the hold start is dirty in the held frame (row 1 too:
+      // the cursor left it); rows untouched since the live paint are not.
+      t.write('\x1b[1;1Hd\x1b[?2026h\x1b[2;1He');
+      const q = t.getPresentation();
+      expect([q.needsFullRedraw(), q.isRowDirty(0), q.isRowDirty(2)]).toEqual([false, true, false]);
+      // A live paint during the hold (scrolled/selecting) makes the frame stale for the canvas.
+      t.clearDirty();
+      expect(q.needsFullRedraw()).toBe(true);
+      q.clearDirty();
+      expect(q.needsFullRedraw()).toBe(false);
+      // ...and that older frame on the canvas makes the next live paint a full one.
+      t.write('\x1b[?2026l');
+      expect(t.needsFullRedraw()).toBe(true);
+      t.clearDirty();
+      expect(t.needsFullRedraw()).toBe(false);
+    });
+  });
+
+  test('two terminals hold independently; freeing during a hold is clean', () => {
+    const g = fresh();
+    const a = g.createTerminal(6, 1);
+    const b = g.createTerminal(6, 1);
+    a.enableRenderHold();
+    b.enableRenderHold();
+    a.write('A\x1b[?2026hA');
+    b.write('B');
+    expect(row(a.getPresentation(), 0)).toBe('A');
+    expect(b.getPresentation()).toBe(b);
+    b.write('\x1b[?2026hB');
+    a.write('\x1b[?2026l');
+    expect(a.getPresentation()).toBe(a);
+    expect(row(b.getPresentation(), 0)).toBe('B');
+    expect(() => b.free()).not.toThrow();
+    expect(() => b.getPresentation()).toThrow('GhosttyTerminal has been freed');
+    expect(() => b.releaseRenderHold()).toThrow('GhosttyTerminal has been freed');
+    a.write('\x1b[?2026hz');
+    expect(row(a.getPresentation(), 0)).toBe('AA');
+    a.free();
   });
 });

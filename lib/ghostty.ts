@@ -20,6 +20,7 @@ import type {
   TerminalBackend,
   VtBackend,
 } from './backends/types';
+import type { IRenderable } from './renderer';
 import {
   CellFlags,
   type Cursor,
@@ -54,6 +55,13 @@ type BridgeExports = GhosttyWasmExports | RawExports;
 
 /** Backend of each live facade, for same-module integrations (KeyEncoder sync). */
 const terminalImpls = new WeakMap<GhosttyTerminal, TerminalBackend>();
+
+/**
+ * A render hold (synchronized output) presents its captured frame for at most
+ * this long, as upstream recommends, so a program that never releases its
+ * hold cannot freeze the screen.
+ */
+export const RENDER_HOLD_TIMEOUT_MS = 1000;
 
 function nativeOnly(kind: BackendKind, what: string): Error {
   return new Error(`${what} requires the libghostty-vt backend (this instance is '${kind}')`);
@@ -279,6 +287,11 @@ export class GhosttyTerminal {
   private _cols: number;
   private _rows: number;
   private freed = false;
+  /** Active render hold seen last (0: none) and when it was first seen (see `getPresentation`). */
+  private holdId = 0;
+  private holdSince = 0;
+  /** Monotonic milliseconds for the hold timeout; replaceable in tests. */
+  private clock: () => number = () => performance.now();
 
   constructor(
     exports: BridgeExports,
@@ -320,6 +333,8 @@ export class GhosttyTerminal {
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
     if (bytes.length === 0) return;
     this.impl.write(bytes);
+    // A hold that began in this write starts its timeout now.
+    this.noteRenderHold();
   }
 
   resize(cols: number, rows: number): void {
@@ -434,6 +449,58 @@ export class GhosttyTerminal {
     this.assertLive();
     if (!this.impl.takeHostEvents) throw nativeOnly(this.kind, 'takeHostEvents');
     return this.impl.takeHostEvents();
+  }
+
+  /**
+   * @internal libghostty-vt only: present synchronized output (mode 2026). From
+   * now on each render hold captures the frame it began with, inside the native
+   * RENDER_HOLD callback, and `getPresentation()` returns it until the hold
+   * ends. Everything else (getLine, the public buffer, selection, replies)
+   * keeps reading the live terminal. Idempotent.
+   */
+  enableRenderHold(): void {
+    this.assertLive();
+    if (!this.impl.enableRenderHold) throw nativeOnly(this.kind, 'enableRenderHold');
+    this.impl.enableRenderHold();
+  }
+
+  /**
+   * @internal libghostty-vt only: end the active render hold now (mode 2026 is
+   * reset without a callback, like upstream's timeout). No-op without a hold.
+   */
+  releaseRenderHold(): void {
+    this.assertLive();
+    if (!this.impl.releaseRenderHold) throw nativeOnly(this.kind, 'releaseRenderHold');
+    this.impl.releaseRenderHold();
+    this.holdId = 0;
+  }
+
+  /**
+   * @internal Renderer hook (`IRenderable.getPresentation`): what to draw now.
+   * This terminal itself, or during a render hold the frame captured when it
+   * began. A hold presented for RENDER_HOLD_TIMEOUT_MS since the write that
+   * began it is released here, at draw time as in upstream's example, so no
+   * timer exists. Re-enabling 2026 during a hold does not start a new hold
+   * (no callback), so it never extends the deadline.
+   */
+  getPresentation(): IRenderable {
+    this.assertLive();
+    if (!this.impl.getHeldFrame || this.noteRenderHold() === 0) return this;
+    if (this.clock() - this.holdSince >= RENDER_HOLD_TIMEOUT_MS) {
+      this.releaseRenderHold();
+      return this;
+    }
+    return this.impl.getHeldFrame() ?? this;
+  }
+
+  /** Track the active hold; a new hold id restarts the timeout. Returns the id. */
+  private noteRenderHold(): number {
+    const id = this.impl.getRenderHold?.() ?? 0;
+    if (id !== this.holdId) {
+      this.holdId = id;
+      if (id) this.holdSince = this.clock();
+    }
+    return id;
   }
 
   // ==========================================================================

@@ -413,7 +413,12 @@ export class Terminal implements ITerminalCore {
       const config = this.buildWasmConfig();
       this.wasmTerm = this.ghostty!.createTerminal(this.cols, this.rows, config);
       // Native bells/titles replace the legacy byte/regex heuristics.
-      if (this.wasmTerm.backend === 'libghostty-vt') this.wasmTerm.enableHostEvents();
+      if (this.wasmTerm.backend === 'libghostty-vt') {
+        this.wasmTerm.enableHostEvents();
+        // Synchronized output (2026): the renderer presents the frame each hold
+        // began with (see GhosttyTerminal.getPresentation); buffer reads stay live.
+        this.wasmTerm.enableRenderHold();
+      }
 
       // Create canvas element
       this.canvas = document.createElement('canvas');

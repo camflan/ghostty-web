@@ -37,6 +37,14 @@ export interface IRenderable {
    * For simple cells, returns the single character.
    */
   getGraphemeString?(row: number, col: number): string;
+  /**
+   * What to draw instead of this buffer, if anything: during a render hold
+   * (synchronized output, mode 2026) the frame captured when the hold began.
+   * Consulted only at the bottom of the viewport with no selection, so a held
+   * frame is never mixed with live history rows or a live selection overlay
+   * (those views show the live screen while the hold continues).
+   */
+  getPresentation?(): IRenderable;
 }
 
 export interface IScrollbackProvider {
@@ -291,6 +299,12 @@ export class CanvasRenderer {
     scrollbackProvider?: IScrollbackProvider,
     scrollbarOpacity: number = 1
   ): void {
+    // Synchronized output: draw the held frame (every read below, including
+    // graphemes, cursor and dirty tracking, then comes from it).
+    if (buffer.getPresentation && viewportY === 0 && !this.selectionManager?.hasSelection()) {
+      buffer = buffer.getPresentation();
+    }
+
     // Store buffer reference for grapheme lookups in renderCell
     this.currentBuffer = buffer;
 

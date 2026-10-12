@@ -165,6 +165,22 @@ export interface TerminalBackend {
   takeHostEvents?(): NativeHostEvent[];
   /** Native focus report for the current mode-1004 state; returns owned bytes. */
   encodeFocus?(focused: boolean): Uint8Array;
+  /**
+   * Install GHOSTTY_TERMINAL_OPT_RENDER_HOLD: from now on every render hold
+   * (synchronized output, mode 2026) captures the frame it began with, inside
+   * the native callback, before any later byte is parsed. Idempotent.
+   */
+  enableRenderHold?(): void;
+  /** Id of the active render hold (a new id per hold), or 0 when none is active. */
+  getRenderHold?(): number;
+  /**
+   * The frame captured when the active hold began, for presentation only;
+   * null when no hold is active (or the native grid did not match the host
+   * grid at that moment, which the post-write size restore ends anyway).
+   */
+  getHeldFrame?(): HeldFrameView | null;
+  /** End the active hold as upstream's timeout does: mode 2026 off via OPT_MODE (no callback). */
+  releaseRenderHold?(): void;
   /** Install the active screen's terminal-owned (tracked) selection; points must be valid. */
   setSelectionRange?(start: ScreenPoint, end: ScreenPoint): void;
   /** Endpoints of the active screen's selection, read now; null when there is none. */
@@ -173,6 +189,27 @@ export interface TerminalBackend {
   clearSelection?(): void;
   /** Copy text of the selection (plain, soft wraps unwrapped, trailing blanks trimmed); '' when none. */
   getSelectionText?(): string;
+}
+
+/**
+ * A frame captured at the start of a render hold (libghostty-vt only). It has
+ * the renderer's read shape (`IRenderable` in lib/renderer.ts) but is fixed:
+ * cells, grapheme clusters, colors and cursor are those of the moment the hold
+ * began. Live getters, the public buffer and replies are unaffected by it.
+ * Dirty tracking is relative to what the renderer painted last, live or held.
+ */
+export interface HeldFrameView {
+  readonly backend: 'libghostty-vt';
+  getDimensions(): { cols: number; rows: number };
+  /** Copies of one captured row, or null if out of range. */
+  getLine(y: number): GhosttyCell[] | null;
+  getCursor(): RenderStateCursor;
+  /** The captured grapheme cluster at (row, col) (' ' when empty). */
+  getGraphemeString(row: number, col: number): string;
+  isRowDirty(y: number): boolean;
+  needsFullRedraw(): boolean;
+  /** Called by the renderer after painting this frame. */
+  clearDirty(): void;
 }
 
 export interface KeyEncoderBackend {

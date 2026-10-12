@@ -29,6 +29,7 @@ import {
 } from '../types';
 import { type NativeAbi, type NativeLayout, bitsOf } from './native-abi';
 import type {
+  HeldFrameView,
   KeyEncoderBackend,
   NativeHostEvent,
   NativeMouseEvent,
@@ -44,6 +45,8 @@ const LEGACY_DEFAULT_BACKGROUND = 0x000000;
 const DEFAULT_SCROLLBACK_LINES = 10_000;
 /** Mode 2027 (grapheme clustering) is ghostty-web's default, kept across RIS. */
 const GRAPHEME_CLUSTER_MODE = 2027;
+/** Synchronized output: the only source of render holds today. */
+const SYNC_OUTPUT_MODE = 2026;
 /** Largest chunk handed to one `vt_write` call; the parser state spans chunks. */
 const WRITE_CHUNK = 64 * 1024;
 /** `readResponse()` returns at most this many bytes per call, as the legacy engine did. */
@@ -96,6 +99,23 @@ interface ResolvedStyle {
 
 const NO_STYLE: ResolvedStyle = { fg: -1, bg: -1, flags: 0 };
 
+/** The frame a render hold began with (see NativeTerminal.onRenderHold). */
+interface HeldFrame {
+  readonly id: number;
+  readonly cols: number;
+  readonly rows: number;
+  /** Live `cleanSeq` at capture: the dirty flags below are relative to that paint. */
+  readonly cleanSeq: number;
+  dirty: DirtyState;
+  readonly rowDirty: Uint8Array;
+  readonly cursor: RenderStateCursor;
+  /** Own copies of rows the live pool changed since; other rows are still shared. */
+  readonly ownRows: GhosttyCell[][];
+  /** Grapheme clusters of the own rows, keyed like `NativeTerminal.clusters`. */
+  readonly clusters: Map<number, number[]>;
+  view: HeldFrameView;
+}
+
 /** Shared (immutable) bell event, so a bell flood queues no per-bell objects. */
 const BELL_EVENT: NativeHostEvent = Object.freeze({ type: 'bell' });
 
@@ -107,6 +127,7 @@ export class NativeBackend implements VtBackend {
   private pasteReaderIndex = 0;
   private bellIndex = 0;
   private titleChangedIndex = 0;
+  private renderHoldIndex = 0;
   private callbackError: unknown = undefined;
   /** True while a vt_write or paste is running on any terminal of this instance. */
   writing = false;
@@ -216,6 +237,28 @@ export class NativeBackend implements VtBackend {
       terminal.onTitleChanged()
     );
     return this.titleChangedIndex;
+  }
+
+  /**
+   * @internal Shared RENDER_HOLD trampoline: `void (terminal, userdata, bool held)`.
+   * Capturing the held frame happens in here, as upstream requires; it runs
+   * only bridge code (no host listener).
+   */
+  renderHoldCallback(): number {
+    if (!this.renderHoldIndex) {
+      this.renderHoldIndex = this.abi.addFunction(3, false, (handle, _userdata, held) => {
+        try {
+          const terminal = this.terminals.get(handle);
+          if (!terminal)
+            throw new Error(`libghostty-vt: render hold for unknown terminal ${handle}`);
+          terminal.onRenderHold(held !== 0);
+        } catch (error) {
+          this.callbackError ??= error;
+        }
+        return undefined;
+      });
+    }
+    return this.renderHoldIndex;
   }
 
   private eventCallback(what: string, effect: (terminal: NativeTerminal) => void): number {
@@ -469,6 +512,23 @@ export class NativeTerminal implements TerminalBackend {
   private hostEventAt: number[] = [];
   private readonly decoder = new TextDecoder();
 
+  // ---- render hold (synchronized output) presentation ----
+  private renderHoldEnabled = false;
+  private holdIds = 0;
+  /** Id of the active hold (0: none) and the frame it began with. */
+  private activeHold = 0;
+  private heldFrame: HeldFrame | null = null;
+  /** Bumped by every live `markClean()`, i.e. every paint of the live view. */
+  private cleanSeq = 0;
+  /** Hold id of the frame painted last (0: the live view was). */
+  private presentedHold = 0;
+  /**
+   * The canvas shows a state no older than the last live paint, so the live
+   * dirty flags (accumulated since that paint) cover every difference. False
+   * after painting a held frame captured before the last live paint.
+   */
+  private canvasCurrent = true;
+
   constructor(
     private readonly backend: NativeBackend,
     cols: number,
@@ -543,6 +603,10 @@ export class NativeTerminal implements TerminalBackend {
           this.nativeResize(this.cols, this.rows);
           this.decodeAll = true;
         }
+        // In-band DECCOLM resizes through upstream's Terminal.resize, which turns
+        // 2026 off without RENDER_HOLD(false) (even for an unchanged width), so
+        // the restore above sees no hold to end. End such a hold here.
+        if (this.activeHold && !this.getMode(SYNC_OUTPUT_MODE, false)) this.endHold();
       }
     } finally {
       this.backend.writing = false;
@@ -678,15 +742,18 @@ export class NativeTerminal implements TerminalBackend {
     this.replies = [];
     this.hostEvents = [];
     this.hostEventAt = [];
+    this.activeHold = 0;
+    this.heldFrame = null;
   }
 
   // ==========================================================================
   // Render state
   // ==========================================================================
 
+  /** Live dirty state; FULL while the canvas may show an older held frame. */
   update(): DirtyState {
     this.ensureFresh();
-    return this.dirty;
+    return this.canvasCurrent ? this.dirty : DirtyState.FULL;
   }
 
   getCursor(): RenderStateCursor {
@@ -705,7 +772,7 @@ export class NativeTerminal implements TerminalBackend {
 
   isRowDirty(y: number): boolean {
     this.ensureFresh();
-    if (this.dirty === DirtyState.FULL) return true;
+    if (this.dirty === DirtyState.FULL || !this.canvasCurrent) return true;
     if (this.dirty === DirtyState.NONE) return false;
     return this.rowDirty[y] === 1;
   }
@@ -717,6 +784,10 @@ export class NativeTerminal implements TerminalBackend {
     );
     this.dirty = DirtyState.NONE;
     this.rowDirty.fill(0);
+    // The live view was painted: the canvas is current again.
+    this.cleanSeq++;
+    this.presentedHold = 0;
+    this.canvasCurrent = true;
   }
 
   getViewport(): GhosttyCell[] {
@@ -1336,8 +1407,151 @@ export class NativeTerminal implements TerminalBackend {
   }
 
   // ==========================================================================
-  // Host events (BELL / TITLE_CHANGED effects)
+  // Render hold (RENDER_HOLD effect): synchronized output presentation
   // ==========================================================================
+
+  /**
+   * Install the RENDER_HOLD callback. From now on a hold captures the frame
+   * it began with (see `onRenderHold`) for `getHeldFrame()`; nothing else
+   * changes: getters, the buffer and replies keep reading the live terminal.
+   */
+  enableRenderHold(): void {
+    if (this.renderHoldEnabled) return;
+    this.set('RENDER_HOLD', this.backend.renderHoldCallback());
+    this.renderHoldEnabled = true;
+  }
+
+  getRenderHold(): number {
+    return this.activeHold;
+  }
+
+  getHeldFrame(): HeldFrameView | null {
+    return this.heldFrame?.view ?? null;
+  }
+
+  /**
+   * End the active hold the way upstream's timeout example does: mode 2026
+   * off through OPT_MODE, which never invokes the callback, so the hold state
+   * is dropped here. A later `CSI ? 2026 l` is then a no-op, `CSI ? 2026 h`
+   * starts a new hold.
+   */
+  releaseRenderHold(): void {
+    if (!this.activeHold) return;
+    const s = this.scratch!;
+    const M = this.L.modeConfig;
+    const view = this.abi.view();
+    view.setUint16(s.mode + M.mode, SYNC_OUTPUT_MODE, true);
+    view.setUint8(s.mode + M.value, 0);
+    this.set('MODE', s.mode);
+    this.endHold();
+  }
+
+  private endHold(): void {
+    this.activeHold = 0;
+    this.heldFrame = null;
+  }
+
+  /**
+   * @internal RENDER_HOLD effect. On `held`, nothing after the sequence that
+   * began the hold has been parsed yet, even later in the same write, so the
+   * live terminal is exactly the frame the program wants on screen: render it
+   * now (native render state, styles, graphemes, hyperlinks, cursor) and keep
+   * it. Ends come from mode 2026 reset, RIS and native resizes; `write()`
+   * also ends a hold that DECCOLM switched off without a callback.
+   */
+  onRenderHold(held: boolean): void {
+    if (!this.renderHoldEnabled) return;
+    this.endHold();
+    if (!held) return;
+    this.activeHold = ++this.holdIds;
+    this.heldFrame = this.captureFrame(this.activeHold);
+  }
+
+  private captureFrame(id: number): HeldFrame | null {
+    // DECCOLM earlier in this write may have resized the native grid; it no
+    // longer fits the pool. The host restores its size right after the write,
+    // which ends this hold, so there is no frame to keep.
+    const s = this.scratch!;
+    this.getData('COLS', s.out);
+    const cols = this.abi.view().getUint16(s.out, true);
+    this.getData('ROWS', s.out);
+    const rows = this.abi.view().getUint16(s.out, true);
+    if (cols !== this.cols || rows !== this.rows) return null;
+    // The pool may be fresh as of an earlier point of this write: always update.
+    this.refresh();
+    // Rows are shared with the live pool until decodeRow is about to change
+    // one (preserveHeldRow), so a hold costs nothing for rows it never sees change.
+    const frame: HeldFrame = {
+      id,
+      cols,
+      rows,
+      cleanSeq: this.cleanSeq,
+      dirty: this.dirty,
+      rowDirty: this.rowDirty.slice(),
+      cursor: { ...this.cursorState },
+      ownRows: [],
+      clusters: new Map(),
+      view: undefined as unknown as HeldFrameView,
+    };
+    frame.view = this.heldFrameView(frame);
+    return frame;
+  }
+
+  /** Copy one live pool row (and its clusters) into a held frame before it changes. */
+  private preserveHeldRow(frame: HeldFrame, y: number): void {
+    const base = y * this.cols;
+    const row: GhosttyCell[] = new Array(this.cols);
+    for (let x = 0; x < this.cols; x++) {
+      row[x] = { ...this.pool[base + x] };
+      const cluster = this.clusters.get(base + x);
+      if (cluster) frame.clusters.set(base + x, cluster);
+    }
+    frame.ownRows[y] = row;
+  }
+
+  /** Renderer view of a held frame; reads only the frame (and rows still shared with it). */
+  private heldFrameView(frame: HeldFrame): HeldFrameView {
+    const cellAt = (index: number): GhosttyCell => {
+      const own = frame.ownRows[Math.floor(index / frame.cols)];
+      return own ? own[index % frame.cols] : this.pool[index];
+    };
+    const needsFull = () =>
+      frame.dirty === DirtyState.FULL ||
+      (this.presentedHold !== frame.id &&
+        !(this.canvasCurrent && frame.cleanSeq === this.cleanSeq));
+    return {
+      backend: 'libghostty-vt',
+      getDimensions: () => ({ cols: frame.cols, rows: frame.rows }),
+      getLine: (y) => {
+        if (!Number.isInteger(y) || y < 0 || y >= frame.rows) return null;
+        const line: GhosttyCell[] = new Array(frame.cols);
+        for (let x = 0; x < frame.cols; x++) line[x] = { ...cellAt(y * frame.cols + x) };
+        return line;
+      },
+      getCursor: () => ({ ...frame.cursor }),
+      getGraphemeString: (row, col) => {
+        if (!Number.isInteger(row) || row < 0 || row >= frame.rows) return ' ';
+        if (!Number.isInteger(col) || col < 0 || col >= frame.cols) return ' ';
+        const index = row * frame.cols + col;
+        const cluster = (frame.ownRows[row] ? frame.clusters : this.clusters).get(index);
+        if (cluster) return String.fromCodePoint(...cluster);
+        const codepoint = cellAt(index).codepoint;
+        return codepoint ? String.fromCodePoint(codepoint) : ' ';
+      },
+      isRowDirty: (y) => needsFull() || frame.rowDirty[y] === 1,
+      needsFullRedraw: needsFull,
+      clearDirty: () => {
+        // The canvas now shows this frame; it is current if it was captured
+        // after the last live paint (the live dirty flags then cover it).
+        if (this.presentedHold !== frame.id) {
+          this.canvasCurrent = frame.cleanSeq === this.cleanSeq;
+          this.presentedHold = frame.id;
+        }
+        frame.dirty = DirtyState.NONE;
+        frame.rowDirty.fill(0);
+      },
+    };
+  }
 
   /**
    * Install the BELL and TITLE_CHANGED callbacks; from now on every bell and
@@ -1579,6 +1793,8 @@ export class NativeTerminal implements TerminalBackend {
   }
 
   private decodeRow(y: number): void {
+    // The pool row is about to change: a held frame still sharing it keeps a copy.
+    if (this.heldFrame && !this.heldFrame.ownRows[y]) this.preserveHeldRow(this.heldFrame, y);
     const abi = this.abi;
     const ex = abi.exports;
     const L = this.L;
