@@ -6,7 +6,7 @@
  * no-button motion 35, X10 limited to column/row 223, per-cell motion
  * de-duplication, Shift bypass with mouse-shift-capture=false) and the core
  * mode handling in `stream_readonly.zig` (last mode wins; any reset turns
- * reporting off). Output is compared as the UTF-8 bytes a text transport sends.
+ * reporting off). Output is compared as wire bytes: UTF-8 onData plus raw onBinary.
  */
 import { describe, regressionCase } from '../../regression/core/harness/scenario';
 import {
@@ -32,8 +32,15 @@ function reports(
     () => {
       if (setup) session.term.write(setup);
       session.data.length = 0;
+      // Exercise the public transport contract without changing byte oracles:
+      // onData is UTF-8, while xterm-style onBinary carries one code unit/byte.
+      const output: (string | Uint8Array)[] = [];
+      session.term.onData((data) => output.push(data));
+      session.term.onBinary((data) =>
+        output.push(Uint8Array.from(data, (char) => char.charCodeAt(0)))
+      );
       act(session);
-      return hexChunks(session.data);
+      return hexChunks(output);
     },
     () => session.dispose()
   );

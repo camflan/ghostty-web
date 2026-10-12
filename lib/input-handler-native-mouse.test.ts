@@ -199,3 +199,107 @@ test('tracking off keeps normal history scrolling and alternate-screen arrow fal
     expect(data).toEqual(['\x1b[B', '\x1b[B', '\x1b[B']);
   });
 });
+
+test('onBinary carries classic X10 bytes exactly once without altering onData', async () => {
+  await session(({ term, data, mouse }) => {
+    const binary: string[] = [];
+    term.onBinary((bytes) => binary.push(bytes));
+    term.resize(120, 10);
+    term.write('\x1b[?1000h');
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    mouse('mouseup', 100, 5, { button: 0 });
+    expect(binary).toEqual(['\x1b[M \x84%', '\x1b[M#\x84%']);
+    expect(Array.from(binary[0], (c) => c.charCodeAt(0))).toEqual([27, 91, 77, 32, 132, 37]);
+    expect(data).toEqual([]);
+  });
+});
+
+test('binary subscription leaves ASCII, SGR and UTF8 mouse formats on the text channel', async () => {
+  await session(({ term, data, mouse }) => {
+    const binary: string[] = [];
+    term.onBinary((bytes) => binary.push(bytes));
+    term.resize(120, 10);
+    term.write('\x1b[?1000h');
+    mouse('mousedown', 3, 3, { button: 0, buttons: 1 });
+    mouse('mouseup', 3, 3, { button: 0 });
+    term.write('\x1b[?1005h');
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    mouse('mouseup', 100, 5, { button: 0 });
+    term.write('\x1b[?1006h');
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    expect(data).toEqual([
+      '\x1b[M ##',
+      '\x1b[M###',
+      '\x1b[M \u0084%',
+      '\x1b[M#\u0084%',
+      '\x1b[<0;100;5M',
+    ]);
+    expect(binary).toEqual([]);
+  });
+});
+
+test('removing the last binary subscriber restores withholding and does not invent a release', async () => {
+  await session(({ term, data, mouse }) => {
+    const binary: string[] = [];
+    const sub = term.onBinary((bytes) => binary.push(bytes));
+    sub.dispose();
+    sub.dispose();
+    term.resize(120, 10);
+    term.write('\x1b[?1000h');
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    term.onBinary((bytes) => binary.push(bytes));
+    mouse('mouseup', 3, 3, { button: 0 });
+    expect(data).toEqual([]);
+    expect(binary).toEqual([]);
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    expect(binary).toEqual(['\x1b[M \x84%']);
+  });
+});
+
+test('binary reports obey disabled stdin, Shift-local ownership and disposal', async () => {
+  await session(({ term, data, mouse }) => {
+    const binary: string[] = [];
+    term.onBinary((bytes) => binary.push(bytes));
+    term.resize(120, 10);
+    term.write('\x1b[?1000h');
+    term.options.disableStdin = true;
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    mouse('mouseup', 100, 5, { button: 0 });
+    term.options.disableStdin = false;
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1, shiftKey: true });
+    mouse('mouseup', 100, 5, { button: 0 });
+    expect(binary).toEqual([]);
+    term.dispose();
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    expect(binary).toEqual([]);
+    expect(data).toEqual([]);
+  });
+});
+
+test('extra-button X10 presses use binary input and pair with lossless ASCII releases', async () => {
+  await session(({ term, data, mouse }) => {
+    const binary: string[] = [];
+    term.onBinary((bytes) => binary.push(bytes));
+    term.write('\x1b[?1000h');
+    mouse('mousedown', 4, 2, { button: 3, buttons: 8 });
+    mouse('mouseup', 4, 2, { button: 3 });
+    expect(binary).toEqual(['\x1b[M\xa0$"']);
+    expect(data).toEqual(['\x1b[M#$"']);
+  });
+});
+
+test('native binary callbacks run after encoding and allow reentrant mode changes', async () => {
+  await session(({ term, data, mouse }) => {
+    const binary: string[] = [];
+    term.resize(120, 10);
+    term.write('\x1b[?1000h');
+    term.onBinary((bytes) => {
+      binary.push(bytes);
+      term.write('\x1b[?1006h');
+    });
+    mouse('mousedown', 100, 5, { button: 0, buttons: 1 });
+    mouse('mouseup', 100, 5, { button: 0 });
+    expect(binary).toEqual(['\x1b[M \x84%']);
+    expect(data).toEqual(['\x1b[<0;100;5m']);
+  });
+});

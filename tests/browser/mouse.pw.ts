@@ -18,6 +18,31 @@ rtest('mouse.sgr-press-and-release', async (ctx) => {
   ctx.checks.equal('sgr-click', (await term.events()).data, ['\x1b[<0;4;2M', '\x1b[<0;4;2m']);
 });
 
+rtest('mouse.x10-raw-byte-channel', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 120, rows: 10 });
+  await term.writeAndSettle('\x1b[?1000h');
+  await term.clearEvents();
+  await term.clickCell(4, 99);
+  await ctx.harness.frame();
+  const raw = await term.events();
+  ctx.checks.equal(
+    'raw-byte-reports',
+    raw.binary.map((s) => Array.from(s, (c) => c.charCodeAt(0))),
+    [
+      [27, 91, 77, 32, 132, 37],
+      [27, 91, 77, 35, 132, 37],
+    ]
+  );
+  ctx.checks.equal('no-corrupt-text-copy', raw.data, []);
+  await term.writeAndSettle('\x1b[?1006h');
+  await term.clearEvents();
+  await term.clickCell(4, 99);
+  await ctx.harness.frame();
+  const sgr = await term.events();
+  ctx.checks.equal('sgr-stays-text', sgr.data, ['\x1b[<0;100;5M', '\x1b[<0;100;5m']);
+  ctx.checks.equal('no-binary-sgr-duplicate', sgr.binary, []);
+});
+
 rtest('mouse.sgr-wheel-reported-when-tracking', async (ctx) => {
   const term = await ctx.harness.create({ cols: 10, rows: 4 });
   await term.writeAndSettle(SGR_MOUSE);

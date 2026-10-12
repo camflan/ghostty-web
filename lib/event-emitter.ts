@@ -3,6 +3,10 @@ import type { IDisposable, IEvent } from './interfaces';
 export class EventEmitter<T> {
   private listeners: Array<(arg: T) => void> = [];
 
+  get hasListeners(): boolean {
+    return this.listeners.length > 0;
+  }
+
   fire(arg: T): void {
     for (const listener of this.listeners) {
       listener(arg);

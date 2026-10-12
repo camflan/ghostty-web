@@ -82,6 +82,7 @@ export class Terminal implements ITerminalCore {
 
   // Event emitters
   private dataEmitter = new EventEmitter<string>();
+  private binaryEmitter = new EventEmitter<string>();
   private resizeEmitter = new EventEmitter<{ cols: number; rows: number }>();
   private bellEmitter = new EventEmitter<void>();
   private selectionChangeEmitter = new EventEmitter<void>();
@@ -92,6 +93,14 @@ export class Terminal implements ITerminalCore {
   private cursorMoveEmitter = new EventEmitter<void>();
   // Public event accessors (xterm.js compatibility)
   public readonly onData: IEvent<string> = this.dataEmitter.event;
+  /**
+   * Non-UTF-8 native mouse input, using xterm's binary-string convention.
+   * Each character is one byte (0..255): use Uint8Array.from(data, c => c.charCodeAt(0))
+   * for WebSocket input, or Buffer.from(data, 'latin1') for a Node PTY. Never UTF-8
+   * encode this channel. Ordinary input remains onData; without a subscriber,
+   * unsafe raw reports continue to be withheld for string-only consumers.
+   */
+  public readonly onBinary: IEvent<string> = this.binaryEmitter.event;
   public readonly onResize: IEvent<{ cols: number; rows: number }> = this.resizeEmitter.event;
   public readonly onBell: IEvent<void> = this.bellEmitter.event;
   public readonly onSelectionChange: IEvent<void> = this.selectionChangeEmitter.event;
@@ -510,7 +519,15 @@ export class Terminal implements ITerminalCore {
         },
         this.textarea,
         mouseConfig,
-        () => this.wasmTerm
+        () => this.wasmTerm,
+        (data: string) => {
+          if (this.isDisposed || this.options.disableStdin || !this.binaryEmitter.hasListeners)
+            return false;
+          this.selectionManager?.clearSelection();
+          this.awaitingEcho = true;
+          this.binaryEmitter.fire(data);
+          return true;
+        }
       );
 
       // Create selection manager (pass textarea for context menu positioning)
@@ -1242,6 +1259,7 @@ export class Terminal implements ITerminalCore {
 
     // Dispose event emitters
     this.dataEmitter.dispose();
+    this.binaryEmitter.dispose();
     this.resizeEmitter.dispose();
     this.bellEmitter.dispose();
     this.selectionChangeEmitter.dispose();

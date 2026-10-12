@@ -694,10 +694,10 @@
     },
     {
       "id": "mouse.x10-col100-raw-byte",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-10 (js-layer, gap on both engines): X10 coordinates are built as UTF-16 code units and emitted through string onData, so byte 0x84 becomes UTF-8 c2 84"
+      "reason": "Legacy-only gap; native onBinary sends exact raw X10 bytes. The unchanged wire-byte oracle now observes UTF-8 onData and raw onBinary together instead of a text-only transport."
     },
     {
       "id": "mouse.x10-beyond-223-dropped",

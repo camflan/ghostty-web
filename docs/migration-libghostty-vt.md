@@ -234,11 +234,12 @@ that policy. The upstream XTSHIFTESCAPE override is not exposed by this C API, s
 this slice implements the default host Shift-selection policy, not that override.
 Legacy input encoding/routing is unchanged.
 
-**The PTY API is still string-only.** SGR, URXVT, SGR-pixels and UTF8 mouse formats
-can be decoded losslessly. Classic X10 reports containing invalid UTF-8 high-bit
-bytes are withheld rather than corrupted or double-encoded; a withheld press does
-not create an orphan release. The raw-byte X10 case remains an explicit failing
-gap. No `onBinary` API or transport migration is implied by this slice.
+**At this mouse checkpoint, the PTY API was still string-only.** SGR, URXVT,
+SGR-pixels and UTF8 mouse formats could be decoded losslessly. Classic X10 reports
+containing invalid UTF-8 high-bit bytes were withheld rather than corrupted or
+double-encoded; a withheld press did not create an orphan release. The raw-byte
+X10 gap was kept explicit, then addressed by the additive binary slice below—not
+by silently changing `onData`'s encoding.
 
 Eight existing core gaps pass their unchanged assertions on native and are now
 required: Alt/Meta presses, Shift bypass, cell-motion deduplication, no-button
@@ -401,6 +402,54 @@ Three core selection gaps and five browser selection gaps are promoted unchanged
 on native. The two rendering gaps are promoted on both engines. Legacy rejection
 coverage for native selection methods runs in the existing artifact-selected facade
 scenario, not in native-only unit tests, so native CI does not need the legacy WASM.
+
+## Additive binary mouse input
+
+`Terminal.onBinary` adds xterm-compatible raw-byte strings without changing
+`onData`'s UTF-8 contract. A native mouse report that cannot be decoded losslessly
+as UTF-8 is emitted only on the binary channel; text-compatible reports stay on
+`onData`. Each binary character represents one byte. Browser consumers should use
+`Uint8Array.from(data, char => char.charCodeAt(0))`; a Node byte-capable PTY can use
+`Buffer.from(data, 'latin1')`. UTF-8 encoding a binary string would corrupt it.
+
+The binary channel is opt-in: without a subscriber, unsafe reports are withheld
+as at the mouse checkpoint, and a withheld press does not own a later release.
+Disabled stdin, Shift-local selection, subscription disposal and terminal teardown
+apply to binary input too. Legacy mouse encoding remains unchanged.
+
+Both demo clients send binary WebSocket frames for this channel. The server forwards
+them as buffers, never interpreting them as UTF-8 or resize JSON; the existing text
+and resize protocol is unchanged. Tests exercise buffer, array-buffer, view and
+fragmented payloads and verify that JSON-looking binary bytes remain literal input.
+The original X10 column-100 byte oracle is unchanged; its transport helper now
+observes UTF-8 `onData` and raw `onBinary` together. A trusted-pointer browser case
+checks both raw input and transition back to SGR text reporting.
+
+Six Chromium → WebSocket → Linux PTY probes passed byte-for-byte: raw X10 press,
+release, wheel, an extra-button press/ASCII release pair, SGR press/release, and
+ordinary Unicode keyboard input. No browser error or WASM trap was recorded;
+services were stopped after the run. Other operating-system PTYs remain manual
+validation gates, not claims made by the Linux smoke.
+
+## Remaining API and policy decisions
+
+The shipping Ghostty source remains unpatched at the reviewed pin. Two API limits
+are not hidden by the improvements above: general inactive-normal-screen buffer
+reads are unavailable, and exact repeated/in-write focus-enable reports need an
+upstream mode/focus hook. Either an upstream extension or an explicitly approved
+temporary native patch is required; no such patch is included here.
+
+Scroll-on-output also retains the existing jump-to-bottom default. Preserving the
+viewed history by default (with a compatibility option), or making preservation
+opt-in, is a product choice still awaiting approval. Its native-policy gap is not
+silently reclassified as passing.
+
+A required selection-browser check exposed an unrelated edge timer race during
+integration. At a clamped viewport, a delayed auto-scroll tick could move an
+otherwise stationary drag endpoint to a corner. A timed unit test reproduced the
+exact wrong range; auto-scroll now stops when no viewport movement is possible.
+The existing highlight assertion remains unchanged, and real scrolling still
+extends the selection normally.
 
 ## Commands
 

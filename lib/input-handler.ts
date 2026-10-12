@@ -224,6 +224,7 @@ export class InputHandler {
   private container: HTMLElement;
   private inputElement?: HTMLElement;
   private onDataCallback: (data: string) => void;
+  private onBinaryCallback?: (data: string) => boolean;
   private onBellCallback: () => void;
   private onKeyCallback?: (keyEvent: IKeyEvent) => void;
   private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
@@ -302,12 +303,14 @@ export class InputHandler {
     onCopy?: () => boolean,
     inputElement?: HTMLElement,
     mouseConfig?: MouseTrackingConfig,
-    getTerminal?: () => GhosttyTerminal | undefined
+    getTerminal?: () => GhosttyTerminal | undefined,
+    onBinary?: (data: string) => boolean
   ) {
     this.encoder = ghostty.createKeyEncoder();
     this.container = container;
     this.inputElement = inputElement;
     this.onDataCallback = onData;
+    this.onBinaryCallback = onBinary;
     this.onBellCallback = onBell;
     this.onKeyCallback = onKey;
     this.customKeyEventHandler = customKeyEventHandler;
@@ -1042,10 +1045,12 @@ export class InputHandler {
     try {
       text = this.mouseTextDecoder.decode(bytes);
     } catch {
-      // Classic X10 high-bit coordinates/buttons need a binary PTY channel.
-      // onData is UTF-8 text: do not send replacement characters or double-encode
-      // raw bytes as Latin-1. SGR/URXVT/pixels and UTF8 mouse formats are lossless.
-      return false;
+      // Never corrupt raw X10 bytes through UTF-8 onData. The additive onBinary
+      // channel uses xterm's byte-string convention (one 0..255 code unit/byte).
+      // With no binary subscriber, keep withholding the unsafe press so it
+      // cannot create an orphan release for an existing string-only consumer.
+      const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+      return this.onBinaryCallback?.(binary) ?? false;
     }
     this.onDataCallback(text);
     return true;

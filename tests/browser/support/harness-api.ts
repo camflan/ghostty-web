@@ -159,6 +159,7 @@ export interface Capture {
 
 export interface TerminalEvents {
   data: string[];
+  binary: string[];
   titles: string[];
   bells: number;
   resizes: { cols: number; rows: number }[];

@@ -190,6 +190,7 @@ function nextFrame(): Promise<void> {
 function emptyEvents(): TerminalEvents {
   return {
     data: [],
+    binary: [],
     titles: [],
     bells: 0,
     resizes: [],
@@ -232,6 +233,7 @@ const api: HarnessApi = {
     term.open(host);
     const entry: Entry = { term, host, events: emptyEvents(), resizes: 0, viewportDecodes: 0 };
     term.onData((d) => entry.events.data.push(d));
+    term.onBinary((d) => entry.events.binary.push(d));
     term.onTitleChange((t) => entry.events.titles.push(t));
     term.onBell(() => entry.events.bells++);
     term.onResize((size) => entry.events.resizes.push(size));

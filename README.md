@@ -61,7 +61,11 @@ const term = new Terminal({
 });
 
 term.open(document.getElementById('terminal'));
-term.onData((data) => websocket.send(data));
+term.onData((data) => websocket.send(data)); // UTF-8 text input
+term.onBinary((data) => {
+  // Raw bytes (e.g. classic X10 mouse reports); send a binary WebSocket frame.
+  websocket.send(Uint8Array.from(data, (char) => char.charCodeAt(0)));
+});
 websocket.onmessage = (e) => term.write(e.data);
 ```
 
@@ -93,11 +97,15 @@ The native backend uses Ghostty's mouse encoder for application tracking. Hold
 Shift while starting a drag to select locally instead; without tracking, normal
 history scrolling and the existing alternate-screen wheel behavior are retained.
 
-`onData` remains a UTF-8 string channel, not a binary API. SGR, URXVT, SGR-pixels
-and UTF8 mouse reports are lossless. Classic X10 reports containing invalid UTF-8
-high-bit bytes are withheld rather than corrupted; full raw-byte X10 transport
-remains unsupported. See the [migration notes](./docs/migration-libghostty-vt.md)
-for scope and remaining limitations.
+`onData` remains a UTF-8 string channel. The additive `onBinary` event carries
+non-UTF-8 native mouse reports as xterm-compatible byte strings: each character's
+code is one byte (0–255). Send those as bytes, never as UTF-8 text. The demo handles
+binary WebSocket frames separately from its text/resize protocol.
+
+Without an `onBinary` subscriber, unsafe classic X10 reports remain withheld,
+preserving string-only integrations. SGR, URXVT, SGR-pixels and UTF8 mouse formats
+continue through `onData` without duplication. Legacy encoding is unchanged. See
+the [migration notes](./docs/migration-libghostty-vt.md) for remaining limitations.
 
 ## Link activation safety
 

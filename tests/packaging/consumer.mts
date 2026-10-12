@@ -9,6 +9,11 @@ terminal.open(document.createElement('div'));
 const subscription: IDisposable = terminal.onData((data: string) => {
   console.log(data);
 });
+const binarySubscription: IDisposable = terminal.onBinary((data: string) => {
+  const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
+  console.log(bytes);
+});
+binarySubscription.dispose();
 terminal.write(new Uint8Array([65]), () => {});
 terminal.resize(100, 30);
 terminal.select(0, 0, 1);
