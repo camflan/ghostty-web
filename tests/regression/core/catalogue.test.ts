@@ -22,6 +22,10 @@ const plan = scopePlan();
 // Legacy failures fixed by the native core or native host integration. They
 // must stay REQUIRED on native even though they remain legacy gaps.
 const NATIVE_FIXED = [
+  'event.bell-not-from-osc-terminator',
+  'event.bell-not-from-osc8-terminators',
+  'event.title-uint8array',
+  'event.title-split-across-writes',
   'focus.blur-report',
   'focus.focus-report',
   'focus.report-on-enable',
@@ -112,7 +116,10 @@ describe('core scope plan', () => {
     }
   });
 
-  test('native fixes stay required on native while remaining legacy gaps', () => {
+  test('verified fixes retain their required native or shared scope', () => {
+    for (const id of ['api.buffer-translate-keeps-blank-cells', 'api.buffer-get-chars-grapheme']) {
+      for (const engine of ENGINES) expect(caseScope(plan, id, engine)).toBe('required');
+    }
     for (const id of NATIVE_FIXED) {
       expect([id, caseScope(plan, id, 'web-candidate'), caseScope(plan, id, 'web-pinned')]).toEqual(
         [id, 'required', 'gap']

@@ -177,6 +177,7 @@ export interface HarnessApi {
   ready: Promise<ReadyInfo>;
   create(options: CreateOptions): Promise<number>;
   write(id: number, data: string): void;
+  writeBytes(id: number, data: number[]): void;
   /** Resolve once two consecutive animation frames leave the canvas unchanged. */
   settle(id: number): Promise<number>;
   /** Stop the live render loop; frames are then produced only by `render`. */

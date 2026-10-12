@@ -94,6 +94,14 @@ test('no listener runs inside a native callback; nested writes are delivered aft
   });
 });
 
+test('a nested write enabling focus does not create a report for the outer disabled write', async () => {
+  await session(({ term, log }) => {
+    term.onBell(() => term.write('\x1b[?1004h'));
+    term.write('\x07');
+    expect(log).toEqual(['bell', 'data:\x1b[I']);
+  });
+});
+
 test('reset() from a listener drops the rest of the batch', async () => {
   await session(({ term, log }) => {
     const sub = term.onBell(() => term.reset());

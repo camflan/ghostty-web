@@ -697,6 +697,13 @@
       "gaps": ["web-pinned"],
       "unsupported": [],
       "reason": "Legacy has no focus reporting after stdin is reenabled; native tracks terminal focus independently of internal textarea transfers."
+    },
+    {
+      "id": "api.native-title-and-bell-parser-events",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy uses per-string-write title regexes and raw BEL scans; it misses fragmented UTF-8 byte titles and treats OSC terminators as bells."
     }
   ]
 }

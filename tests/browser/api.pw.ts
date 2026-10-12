@@ -18,6 +18,25 @@ rtest('api.title-bell-and-cursor-move-callbacks', async ({ harness, checks }) =>
   checks.equal('cursor-moves', events.cursorMoves, 1);
 });
 
+rtest('api.native-title-and-bell-parser-events', async ({ harness, checks }) => {
+  const term = await harness.create({ cols: 20, rows: 3 });
+  const bytes = Array.from(new TextEncoder().encode('\x1b]2;€uro\x07'));
+  await harness.page.evaluate(([id, data]) => window.__ghosttyRegression.writeBytes(id, data), [
+    term.id,
+    bytes.slice(0, 6),
+  ] as const);
+  checks.equal('partial-title-not-reported', (await term.events()).titles, []);
+  await harness.page.evaluate(([id, data]) => window.__ghosttyRegression.writeBytes(id, data), [
+    term.id,
+    bytes.slice(6),
+  ] as const);
+  await term.writeAndSettle('\x1b]8;;https://example.com\x07link\x1b]8;;\x07');
+  await term.writeAndSettle('\x07\x07\x1b]2;next\x07');
+  const events = await term.events();
+  checks.equal('native-titles', events.titles, ['€uro', 'next']);
+  checks.equal('only-executed-bells', events.bells, 2);
+});
+
 rtest('api.resize-updates-grid-and-canvas', async (ctx) => {
   const term = await ctx.harness.create({ cols: 10, rows: 3 });
   await term.resize(14, 5);

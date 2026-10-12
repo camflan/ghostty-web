@@ -612,7 +612,9 @@ export class Terminal implements ITerminalCore {
       // A newly enabled focus mode reports after this write's replies/events.
       // Repeated enables/in-write toggles need an upstream hook for exact
       // native ordering and observation.
-      if (!hadFocusReports) this.hostQueue.push(FOCUS_REPORT);
+      // Decide before listeners run: a nested write may enable focus reporting,
+      // but must not manufacture a second enable for this outer, disabled write.
+      if (!hadFocusReports && this.wasmTerm!.hasFocusEvents()) this.hostQueue.push(FOCUS_REPORT);
       this.dispatchHostQueue();
       if (this.isDisposed) return;
     } else {

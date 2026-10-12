@@ -340,6 +340,40 @@ after disable. No browser error or WASM trap was recorded; smoke services were
 stopped afterward. Native OS clipboard dialogs, real IME and other browser/platform
 manual gates remain unverified.
 
+## Native title/bell callbacks and buffer text checkpoint
+
+Native terminals now subscribe to upstream BELL and TITLE_CHANGED effects rather
+than scanning input chunks. Callbacks copy titles immediately and queue events;
+user listeners run only after native parsing returns. Replies, bells and titles
+retain parser order, including multiple events in one write. The host queue handles
+nested writes, reset/disposal and listener exceptions. Same-title suppression stays
+at the public host boundary. Legacy continues using its prior heuristics.
+
+The four original native event gaps pass unchanged, including fragmented and
+Uint8Array titles and BEL used as an OSC terminator. New native bridge, lifecycle
+and browser coverage checks event ordering, callback isolation and fragmentation.
+A required reentrancy test additionally guards against duplicate focus reports when
+a bell listener enables mode 1004 from a nested write.
+
+Buffer lines capture complete active/history grapheme strings when read, so
+retained cells do not look up text from a later write. Column extraction emits
+interior blanks, skips wide-character tails when starting at a wide glyph, and
+preserves padding when untrimmed. Both engines pass the original blank-cell and
+`getChars()` grapheme assertions. The existing public `trimRight` policy still
+removes all trailing whitespace; changing it to xterm's narrower unpopulated-cell
+trimming broke existing scene-text contracts and was deliberately not included.
+Neither those assertions nor the reviewed images were changed.
+
+This checkpoint passed 944 Bun tests, required core 319 native / 276 legacy,
+required browser 97 native / 80 legacy in the canonical container, all six package
+checks, formatting, lint, typecheck and the pinned build. The new native parser-event
+browser case was separately observed failing on legacy; it is not an accepted failure.
+
+Inactive normal-screen reads remain blocked by the pinned C API, which resolves
+row counts, grid refs and formatting against the active screen. This checkpoint
+does not introduce a JavaScript VT parser or snapshot round-trip workaround to
+claim that gap is fixed.
+
 ## Commands
 
 ```bash

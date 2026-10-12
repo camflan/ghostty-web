@@ -247,6 +247,10 @@ const api: HarnessApi = {
     get(id).term.write(data);
   },
 
+  writeBytes(id, data) {
+    get(id).term.write(Uint8Array.from(data));
+  },
+
   async settle(id) {
     const entry = get(id);
     let previous = await canvasHash(entry);

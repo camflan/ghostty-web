@@ -45,10 +45,9 @@
     },
     {
       "id": "api.buffer-translate-keeps-blank-cells",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "WEB-13 (js-layer, gap on both engines): BufferLine.translateToString concatenates getChars(), which is empty for blank cells, so interior blanks disappear (xterm.js renders them as spaces)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "api.buffer-normal-while-alternate",
@@ -59,10 +58,9 @@
     },
     {
       "id": "api.buffer-get-chars-grapheme",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "WEB-13 (js-layer, gap on both engines): BufferCell.getChars returns only the first codepoint of a grapheme"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "api.select-basic",
@@ -907,17 +905,17 @@
     },
     {
       "id": "event.bell-not-from-osc-terminator",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-03 (js-layer, gap on both engines): onBell is a heuristic that fires when a written chunk contains 0x07, including OSC terminators"
+      "reason": "Legacy-only gap; native parser callbacks pass the unchanged assertion. WEB-03 (js-layer, legacy gap): onBell is a heuristic that fires when a written chunk contains 0x07, including OSC terminators"
     },
     {
       "id": "event.bell-not-from-osc8-terminators",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-03 (js-layer, gap on both engines): onBell heuristic fires on BEL-terminated OSC 8 hyperlinks"
+      "reason": "Legacy-only gap; native parser callbacks pass the unchanged assertion. WEB-03 (js-layer, legacy gap): onBell heuristic fires on BEL-terminated OSC 8 hyperlinks"
     },
     {
       "id": "event.title-string",
@@ -933,17 +931,17 @@
     },
     {
       "id": "event.title-uint8array",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-03 (js-layer, gap on both engines): Title detection is a regex over string writes only; titles in Uint8Array writes are never reported"
+      "reason": "Legacy-only gap; native parser callbacks pass the unchanged assertion. WEB-03 (js-layer, legacy gap): Title detection is a regex over string writes only; titles in Uint8Array writes are never reported"
     },
     {
       "id": "event.title-split-across-writes",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-11 (js-layer, gap on both engines): Title regex runs per write, so an OSC title split across writes is never reported"
+      "reason": "Legacy-only gap; native parser callbacks pass the unchanged assertion. IN-11 (js-layer, legacy gap): Title regex runs per write, so an OSC title split across writes is never reported"
     },
     {
       "id": "event.input-was-user-input",
