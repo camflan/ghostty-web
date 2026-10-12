@@ -231,45 +231,45 @@
     },
     {
       "id": "key.alt-b",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-01 (js-layer, gap on both engines): InputHandler syncs only DECCKM into the encoder; mode 1036 (Alt sends ESC, default on) is ignored, so Alt+letter loses its ESC prefix"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. IN-01 (js-layer, legacy gap): InputHandler syncs only DECCKM into the encoder; mode 1036 (Alt sends ESC, default on) is ignored, so Alt+letter loses its ESC prefix"
     },
     {
       "id": "key.alt-period",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-01 (js-layer, gap on both engines): Alt+punctuation takes the printable path without the ESC prefix (mode 1036 ignored)"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. IN-01 (js-layer, legacy gap): Alt+punctuation takes the printable path without the ESC prefix (mode 1036 ignored)"
     },
     {
       "id": "key.ctrl-alt-c",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-01 (js-layer, gap on both engines): isPrintableCharacter treats every Ctrl+Alt chord as AltGr and sends event.key; native legacy encoding is ESC ^C"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. IN-01 (js-layer, legacy gap): isPrintableCharacter treats every Ctrl+Alt chord as AltGr and sends event.key; native legacy encoding is ESC ^C"
     },
     {
       "id": "key.shift-f5",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-07 (js-layer, gap on both engines): Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on function keys"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. WEB-07 (js-layer, legacy gap): Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on function keys"
     },
     {
       "id": "key.shift-home",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-07 (js-layer, gap on both engines): Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on Home"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. WEB-07 (js-layer, legacy gap): Hard-coded table for NONE/SHIFT mods bypasses the encoder and drops Shift on Home"
     },
     {
       "id": "key.home-decckm",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-07 (js-layer, gap on both engines): Hard-coded table ignores application cursor mode (DECCKM) for Home"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. WEB-07 (js-layer, legacy gap): Hard-coded table ignores application cursor mode (DECCKM) for Home"
     },
     {
       "id": "key.kitty-flags-readable-mode-free",

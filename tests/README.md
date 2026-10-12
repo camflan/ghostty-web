@@ -19,22 +19,22 @@ bug reproducers**. Existing bugs and future-parity requirements are in a separat
 explicitly selected [gap suite](gaps/README.md). A gap failure is a real failure,
 not a passing test.
 
-Validated on 2026-10-12, including the Vim/tmux keyboard-mode fix and the
-subsequent checkpoint-review corrections:
+Validated on 2026-10-12, including the separate native keyboard-routing slice
+after migration checkpoint `ffe8b66`:
 
 | Lane                                             | Native (`web-candidate`) | Legacy (`web-pinned`) |
 | ------------------------------------------------ | ------------------------ | --------------------- |
-| Required core behavior                           | 235 passed               | 216 passed            |
+| Required core behavior                           | 241 passed               | 216 passed            |
 | Core controls and harness checks                 | 58 passed                | 58 passed             |
-| Required browser behavior                        | 80 passed                | 71 passed             |
+| Required browser behavior                        | 82 passed                | 72 passed             |
 | Browser controls                                 | 6 passed                 | 6 passed              |
-| Opt-in core gaps                                 | 33 failed, exit 1        | 54 failed, exit 1     |
-| Opt-in browser gaps                              | 20 failed, exit 1        | 29 failed, exit 1     |
+| Opt-in core gaps                                 | 27 failed, exit 1        | 54 failed, exit 1     |
+| Opt-in browser gaps                              | 19 failed, exit 1        | 29 failed, exit 1     |
 | Unsupported core ABI cases (metadata, not tests) | 3                        | 1                     |
 
-The full default `bun test` run passes **792 tests**, including the native core
+The full default `bun test` run passes **808 tests**, including the native core
 lane above, existing public-library tests and harness/policy checks. Browser runs
-use the canonical container: **86 native / 77 legacy passes**, zero skips, retries
+use the canonical container: **88 native / 78 legacy passes**, zero skips, retries
 or flaky results. All eight reviewed scene images remain unchanged. Core matrix
 reports list gaps and unsupported ABI scope separately from executed pass/fail
 counts; no required cases are missing.
@@ -45,9 +45,11 @@ not a 100%-passing behavioral baseline and are superseded by the counts above.**
 The split preserved all 263 core behavior declarations and 97 browser behavior
 declarations, replacing three obsolete browser manifest checks with one scope
 check. The Vim-exit and checkpoint-review fixes added eight required core cases and
-three required browser cases: the current catalogues contain 271 core and 106
-browser declarations (100 browser behavior cases plus 6 controls). No existing
-required case was demoted.
+three required browser cases. The subsequent native keyboard slice adds ten native
+input unit tests and one browser text/shortcut case, and promotes six core keyboard
+gaps plus the browser Alt-key gap on native only, without changing their assertions.
+The current catalogues contain 271 core and 107 browser declarations (101 browser
+behavior cases plus 6 controls). No existing required case was demoted.
 
 See [the migration notes](../docs/migration-libghostty-vt.md) for independent
 reference/package validation, improvements and the approved native scrollback

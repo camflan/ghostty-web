@@ -8,9 +8,10 @@
  * - Encoding keys using Ghostty's KeyEncoder
  * - Emitting data for Terminal to send to PTY
  *
- * Limitations:
- * - Does not handle IME/composition events (CJK input) - to be added later
- * - Captures all keyboard input (preventDefault on everything)
+ * Browser-owned policy:
+ * - Custom shortcuts, clipboard, dead keys and IME/composition stay in the host.
+ * - Terminal-bound native input uses Ghostty for key encoding and mode selection.
+ * - Legacy/standalone handlers retain their compatibility encoding path.
  */
 
 import type { Ghostty, GhosttyTerminal } from './ghostty';
@@ -153,6 +154,49 @@ const KEY_MAP: Record<string, Key> = {
   F24: Key.F24,
 };
 
+// DOM resolves NumLock-off keypad keys to navigation names. Preserve that
+// distinction when translating into Ghostty's physical/semantic key enum.
+const NATIVE_KEYPAD_NAVIGATION: Readonly<Record<string, Key>> = {
+  Home: Key.NUMPAD_HOME,
+  End: Key.NUMPAD_END,
+  Insert: Key.NUMPAD_INSERT,
+  Delete: Key.NUMPAD_DELETE,
+  PageUp: Key.NUMPAD_PAGE_UP,
+  PageDown: Key.NUMPAD_PAGE_DOWN,
+  ArrowUp: Key.NUMPAD_UP,
+  ArrowDown: Key.NUMPAD_DOWN,
+  ArrowLeft: Key.NUMPAD_LEFT,
+  ArrowRight: Key.NUMPAD_RIGHT,
+  Clear: Key.NUMPAD_BEGIN,
+};
+
+// KeyboardEvent has no layout-independent "unshifted character" field. For
+// shifted ASCII punctuation, use the standard key pairs; otherwise keep the
+// browser's resolved text (not a physical KeyA -> 'a' guess on non-US layouts).
+const UNSHIFTED_ASCII: Readonly<Record<string, string>> = {
+  '~': '`',
+  '!': '1',
+  '@': '2',
+  '#': '3',
+  $: '4',
+  '%': '5',
+  '^': '6',
+  '&': '7',
+  '*': '8',
+  '(': '9',
+  ')': '0',
+  _: '-',
+  '+': '=',
+  '{': '[',
+  '}': ']',
+  '|': '\\',
+  ':': ';',
+  '"': "'",
+  '<': ',',
+  '>': '.',
+  '?': '/',
+};
+
 /**
  * InputHandler class
  * Attaches keyboard event listeners to a container and converts
@@ -183,9 +227,9 @@ export class InputHandler {
   private getModeCallback?: (mode: number) => boolean;
   private getTerminalCallback?: () => GhosttyTerminal | undefined;
   private keyupListener: ((e: KeyboardEvent) => void) | null = null;
-  // Only send Kitty releases for presses this handler forwarded to the application.
-  private readonly forwardedKittyKeys = new Set<string>();
-  private readonly clearForwardedKittyKeys = (): void => this.forwardedKittyKeys.clear();
+  // Only encode native releases for presses this handler forwarded to the application.
+  private readonly forwardedNativeKeys = new Set<string>();
+  private readonly clearForwardedNativeKeys = (): void => this.forwardedNativeKeys.clear();
   private onCopyCallback?: () => boolean;
   private mouseConfig?: MouseTrackingConfig;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
@@ -282,16 +326,16 @@ export class InputHandler {
     }
 
     this.keyupListener = (event: KeyboardEvent) => {
-      const forwarded = this.forwardedKittyKeys.delete(event.code);
+      const forwarded = this.forwardedNativeKeys.delete(event.code || event.key);
       if (!forwarded || this.isDisposed || this.isComposing || event.isComposing) return;
-      const terminal = this.nativeKittyTerminal();
-      if (terminal && (terminal.getKittyKeyboardFlags() & 2) !== 0) {
-        this.encodeNativeKitty(event, KeyAction.RELEASE, terminal);
+      const terminal = this.nativeTerminal();
+      if (terminal) {
+        this.encodeNativeKey(event, KeyAction.RELEASE, terminal);
       }
     };
     this.container.addEventListener('keyup', this.keyupListener);
     // Capture blur from the hidden textarea too; the next release may belong to another app.
-    this.container.addEventListener('blur', this.clearForwardedKittyKeys, true);
+    this.container.addEventListener('blur', this.clearForwardedNativeKeys, true);
     this.keydownListener = this.handleKeyDown.bind(this);
     this.container.addEventListener('keydown', this.keydownListener);
 
@@ -380,7 +424,7 @@ export class InputHandler {
    */
   private handleKeyDown(event: KeyboardEvent): void {
     if (this.isDisposed) return;
-    if (!event.repeat) this.forwardedKittyKeys.delete(event.code);
+    if (!event.repeat) this.forwardedNativeKeys.delete(event.code || event.key);
 
     // Ignore keydown events during composition
     // Note: Some browsers send keyCode 229 for all keys during composition
@@ -403,8 +447,11 @@ export class InputHandler {
       }
     }
 
-    // Allow Ctrl+V and Cmd+V to trigger paste event (don't preventDefault)
-    if ((event.ctrlKey || event.metaKey) && event.code === 'KeyV') {
+    const nativeTerminal = this.nativeTerminal();
+    const altGraph = !!nativeTerminal && event.getModifierState?.('AltGraph') === true;
+
+    // Allow Ctrl+V and Cmd+V to trigger paste, but not browser-resolved AltGraph text.
+    if (((event.ctrlKey && !altGraph) || event.metaKey) && event.code === 'KeyV') {
       // Let the browser's native paste event fire
       return;
     }
@@ -421,13 +468,13 @@ export class InputHandler {
       return;
     }
 
-    // An active native Kitty protocol must not be bypassed by the legacy key table.
-    const kittyTerminal = this.nativeKittyTerminal();
-    if (kittyTerminal) {
-      this.encodeNativeKitty(
+    // The native encoder owns ordinary keys, modifiers and protocol transitions
+    // too. Do not bypass it with the legacy printable/special-key tables below.
+    if (nativeTerminal) {
+      this.encodeNativeKey(
         event,
         event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
-        kittyTerminal
+        nativeTerminal
       );
       return;
     }
@@ -544,14 +591,6 @@ export class InputHandler {
 
     // For non-printable keys or keys with modifiers, encode using Ghostty
     try {
-      // Active native Kitty mode returned above. A pop, screen switch or reset
-      // can disable it without touching this encoder's cached options; leaving
-      // those flags set turns Ctrl+B/C/etc. into plain text after Vim exits.
-      // Only clear terminal-owned flags, not a standalone encoder's settings.
-      if (this.getTerminalCallback?.()?.backend === 'libghostty-vt') {
-        this.encoder.setOption(KeyEncoderOption.KITTY_KEYBOARD_FLAGS, 0);
-      }
-
       // Sync encoder options with terminal mode state
       // Mode 1 (DECCKM) controls whether arrow keys send CSI or SS3 sequences
       if (this.getModeCallback) {
@@ -593,35 +632,59 @@ export class InputHandler {
     }
   }
 
-  private nativeKittyTerminal(): GhosttyTerminal | undefined {
+  private nativeTerminal(): GhosttyTerminal | undefined {
     const terminal = this.getTerminalCallback?.();
-    return terminal?.backend === 'libghostty-vt' && terminal.getKittyKeyboardFlags() !== 0
-      ? terminal
-      : undefined;
+    return terminal?.backend === 'libghostty-vt' ? terminal : undefined;
   }
 
-  private encodeNativeKitty(
+  private encodeNativeKey(
     event: KeyboardEvent,
     action: KeyAction,
     terminal: GhosttyTerminal
   ): void {
-    const key = this.mapKeyCode(event.code);
-    if (key === null) return;
-    this.encoder.syncFromTerminal(terminal);
+    // Do not cancel the browser's dead-key/IME handling. Committed text arrives
+    // through composition/beforeinput, not through a fabricated terminal key.
+    if (event.key === 'Dead' || event.key === 'Process') return;
     const printable = Array.from(event.key).length === 1;
-    const letter = /^Key([A-Z])$/.exec(event.code);
-    const digit = /^Digit([0-9])$/.exec(event.code);
-    const unshifted = letter
-      ? letter[1].toLowerCase()
-      : digit
-        ? digit[1]
-        : printable
-          ? event.key
-          : '';
+    const mapped =
+      (event.code.startsWith('Numpad') ? NATIVE_KEYPAD_NAVIGATION[event.key] : undefined) ??
+      this.mapKeyCode(event.code);
+    if (mapped === null && !printable) return;
+    const key = mapped ?? Key.UNIDENTIFIED;
+    const altGraph = event.getModifierState?.('AltGraph') === true;
+    let mods = this.extractModifiers(event);
+    // AltGraph's synthetic Ctrl+Alt bits describe text production, not a terminal
+    // shortcut. consumedMods alone is insufficient: native C0/modifyOtherKeys
+    // encoding intentionally consults the raw modifiers.
+    if (altGraph) {
+      mods &= ~(Mods.CTRL | Mods.ALT);
+      // Shift+AltGraph printable text is also a layout result, not a shortcut.
+      if (printable) mods &= ~Mods.SHIFT;
+    }
+    if (event.getModifierState?.('CapsLock')) mods |= Mods.CAPSLOCK;
+    if (event.getModifierState?.('NumLock')) mods |= Mods.NUMLOCK;
+    const lower = event.key.toLowerCase();
+    const lowerScalar = Array.from(lower).length === 1 ? lower : event.key;
+    const digit = /^Digit([0-9])$/.exec(event.code)?.[1];
+    // Keep the existing numeric-key fallback: shifted digit symbols differ by
+    // layout (e.g. Shift+8 is '(' on German layouts, not the US '*'). A complete
+    // unshifted layout map is not exposed by KeyboardEvent and remains a limit.
+    const unshifted = !printable
+      ? ''
+      : altGraph
+        ? lowerScalar
+        : (digit ?? (event.shiftKey ? UNSHIFTED_ASCII[event.key] : undefined) ?? lowerScalar);
+    const consumedMods =
+      printable && event.shiftKey && unshifted !== event.key ? Mods.SHIFT : Mods.NONE;
+
+    // Always synchronize, including zero/disabled modes after a pop, RIS or
+    // screen switch. There is no independent JS copy of the terminal protocol.
+    this.encoder.syncFromTerminal(terminal);
     const encoded = this.encoder.encode({
       action,
       key,
-      mods: this.extractModifiers(event),
+      mods,
+      consumedMods,
       utf8: printable ? event.key : undefined,
       unshiftedCodepoint: unshifted.codePointAt(0) ?? 0,
       composing: false,
@@ -630,7 +693,7 @@ export class InputHandler {
     event.stopPropagation();
     const data = new TextDecoder().decode(encoded);
     if (data) {
-      if (action !== KeyAction.RELEASE) this.forwardedKittyKeys.add(event.code);
+      if (action !== KeyAction.RELEASE) this.forwardedNativeKeys.add(event.code || event.key);
       this.onDataCallback(data);
       if (action !== KeyAction.RELEASE) this.recordKeyDownData(data);
     }
@@ -1117,8 +1180,8 @@ export class InputHandler {
   dispose(): void {
     if (this.isDisposed) return;
 
-    this.forwardedKittyKeys.clear();
-    this.container.removeEventListener('blur', this.clearForwardedKittyKeys, true);
+    this.forwardedNativeKeys.clear();
+    this.container.removeEventListener('blur', this.clearForwardedNativeKeys, true);
 
     if (this.keydownListener) {
       this.container.removeEventListener('keydown', this.keydownListener);

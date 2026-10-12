@@ -40,8 +40,8 @@ not applied to the upgraded submodule.
 Native replies are copied immediately out of callbacks and drained in order;
 clipboard-read callbacks are not enabled. Host integration supplies real CSS cell
 metrics for size reports, consumes native cursor defaults/styles and explicit
-color metadata, and uses terminal-derived native keyboard options while Kitty
-keyboard mode is active. Existing browser clipboard/shortcut policy remains in
+color metadata, and uses terminal-derived native keyboard options for ordinary
+keys as well as Kitty mode. Existing browser clipboard/shortcut policy remains in
 JavaScript. Structured title/bell effects, complete mouse encoding, native
 selection, synchronized-output presentation and other improvements remain later
 work rather than being mixed into this bridge replacement.
@@ -94,16 +94,16 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including checkpoint-review fixes, was validated on
+The required baseline, including the post-checkpoint native keyboard slice, was validated on
 **2026-10-12**:
 
-- **792 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **293 native / 274 legacy passes** (235 / 216 behavior cases plus
+- **808 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core: **299 native / 274 legacy passes** (241 / 216 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **86 native / 77 legacy passes**, zero skips, retries or flaky
+- Required browser: **88 native / 78 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
-- Opt-in core gaps: **33 native / 54 legacy failures**. Opt-in browser gaps:
-  **20 native / 29 legacy failures**. Every gap run exited **1**; these are open
+- Opt-in core gaps: **27 native / 54 legacy failures**. Opt-in browser gaps:
+  **19 native / 29 legacy failures**. Every gap run exited **1**; these are open
   defects/parity requirements, not passing regression coverage. Counts across
   lanes overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
@@ -129,7 +129,7 @@ popped the flags on exit, Ctrl-B/C/U were encoded as plain letters. That broke
 tmux's Ctrl-B prefix in the same session. The focused reproducer passed legacy
 and failed native; it was not classified as an existing gap.
 
-The non-Kitty input path now clears the cached native Kitty flags before encoding
+The initial fix cleared the cached native Kitty flags on the non-Kitty path before encoding
 control/navigation keys. The change is limited to a terminal-bound native encoder;
 standalone encoder options, browser policy and the other input paths are unchanged.
 Five new required core cases cover pop, explicit disable, RIS, `Terminal.reset()`
@@ -171,6 +171,41 @@ issues before committing the migration:
 These are fixes with new required assertions, not new failure exemptions. The
 native WASM pin/hash and reviewed images are unchanged; no broad keyboard/mouse
 rewrite or backlog scope change is bundled into this checkpoint.
+
+## Post-checkpoint slice: native keyboard routing
+
+Migration checkpoint `ffe8b66` remains separate from this implementation slice.
+Terminal-bound native keyboard events now use `syncFromTerminal()` before every
+press, repeat and paired release. Ghostty selects ordinary, application-cursor,
+keypad, backarrow, modifyOtherKeys and Kitty encodings, including transitions back
+to disabled/default modes. The native path no longer uses the JavaScript printable
+bypass or hard-coded special-key escape table. Those remain only for the explicit
+legacy backend and standalone InputHandler compatibility path.
+
+The browser adapter supplies resolved Unicode text, key identity and modifier
+state. It distinguishes NumLock-off keypad navigation from keypad digits, retains
+case rather than lowercasing the transmitted text, and uses an unidentified native
+key for code-less printable events. Browser-reported AltGraph text is normalized
+without synthetic Ctrl/Alt shortcut bits (or its text-producing Shift bit).
+Custom key handlers, Copy/Paste, dead keys, composition and beforeinput stay in
+JavaScript; only releases paired with forwarded presses reach the encoder.
+
+Six existing core gap cases now pass their original assertions and are required
+on native: Alt-letter, Alt-punctuation, Ctrl+Alt+C, Shift+F5, Shift+Home and Home in
+application-cursor mode. The browser Alt-letter case is also promoted. Legacy
+membership and behavior are unchanged. Ten new native input unit tests cover
+mode transitions, keypad handling, text/layout preservation, AltGraph, dead keys,
+composition, repeat/release, backarrow and beforeinput de-duplication. A browser
+case checks Unicode text through the existing textarea path and host-owned Copy.
+
+Validation additionally passed eleven byte-exact checks through a real Chromium
+keyboard → WebSocket → PTY session, followed by Vim edit/save/resize and same-session
+tmux split/switch/resize/detach. No page errors were recorded. OS-level IME, real
+non-US keyboard layouts and macOS Option policy remain manual-validation limits:
+KeyboardEvent does not supply a complete unshifted layout map, and the adapter's
+numeric/shifted-punctuation fallback is necessarily best-effort. This slice does
+not change mouse/wheel encoding, paste sanitization, focus reporting, selection,
+rendering, the WASM pin, or reviewed visual baselines.
 
 ## Commands
 

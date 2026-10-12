@@ -19,9 +19,15 @@ const declared = new Map(
 );
 const plan = scopePlan();
 
-// Legacy failures the native core fixed (matrix 2026-10-10). They must stay
-// REQUIRED on native even though they remain gaps on the legacy engine.
+// Legacy failures fixed by the native core or native host integration. They
+// must stay REQUIRED on native even though they remain legacy gaps.
 const NATIVE_FIXED = [
+  'key.alt-b',
+  'key.alt-period',
+  'key.ctrl-alt-c',
+  'key.shift-f5',
+  'key.shift-home',
+  'key.home-decckm',
   'encoder.unshifted-codepoint-honoured',
   'grapheme.clustering-survives-ris',
   'key-encoding.pause',

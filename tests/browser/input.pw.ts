@@ -75,6 +75,19 @@ rtest('input.kitty-copy-shortcut-stays-in-browser', async (ctx) => {
   ctx.checks.equal('copy-shortcut-data', data, []);
 });
 
+rtest('input.layout-text-and-copy-remain-browser-safe', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 3 });
+  await term.clickCell(1, 1);
+  // CDP types non-ASCII via insertText, not physical keydown; target the existing
+  // textarea beforeinput path explicitly (the canvas container rejects edits).
+  await ctx.harness.page.locator('textarea').focus();
+  await term.clearEvents();
+  await ctx.harness.page.keyboard.type('aA!é😀');
+  await ctx.harness.page.keyboard.press('Meta+c');
+  await ctx.harness.frame();
+  ctx.checks.equal('text-once-without-copy-bytes', (await term.events()).data.join(''), 'aA!é😀');
+});
+
 rtest('focus.reports-blur-and-focus-when-1004-set', async (ctx) => {
   const term = await ctx.harness.create({ cols: 10, rows: 3 });
   await term.writeAndSettle('\x1b[?1004h');

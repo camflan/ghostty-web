@@ -219,10 +219,10 @@
     },
     {
       "id": "input.alt-letter-sends-esc-prefix",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "IN-01 [js-layer]: InputHandler pushes only DECCKM into the key encoder and drops the Alt modifier, so Alt+b emits 'b' instead of ESC b. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "reason": "Legacy-only gap; native terminal-synchronized keyboard routing now passes the unchanged assertion. IN-01 [js-layer]: InputHandler pushes only DECCKM into the key encoder and drops the Alt modifier, so Alt+b emits 'b' instead of ESC b. (provenance: tests/gaps/browser/history/known-failures.json)"
     },
     {
       "id": "input.kitty-disambiguate-escape",
@@ -662,6 +662,12 @@
     },
     {
       "id": "manifest.scope-catalogue-matches",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "input.layout-text-and-copy-remain-browser-safe",
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
       "unsupported": []
