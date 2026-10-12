@@ -22,6 +22,9 @@ const plan = scopePlan();
 // Legacy failures fixed by the native core or native host integration. They
 // must stay REQUIRED on native even though they remain legacy gaps.
 const NATIVE_FIXED = [
+  'api.select-wide-characters',
+  'api.select-soft-wrapped-line',
+  'api.select-all-includes-history',
   'event.bell-not-from-osc-terminator',
   'event.bell-not-from-osc8-terminators',
   'event.title-uint8array',

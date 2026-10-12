@@ -21,8 +21,6 @@ import { Terminal } from './terminal';
 
 const NATIVE_WASM =
   process.env.GHOSTTY_NATIVE_WASM || new URL('../ghostty-vt.wasm', import.meta.url).pathname;
-const LEGACY_WASM =
-  process.env.GHOSTTY_LEGACY_WASM || new URL('../ghostty-vt-legacy.wasm', import.meta.url).pathname;
 
 let nativeModule: WebAssembly.Module | undefined;
 function nativeGhostty(): Ghostty {
@@ -224,19 +222,6 @@ describe('native selection bridge', () => {
     expect(memory.buffer.byteLength).toBe(warm);
     t.free();
     expect(() => t.getSelectionRange()).toThrow('GhosttyTerminal has been freed');
-  });
-
-  test('the legacy engine reports the methods as unsupported', () => {
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(readFileSync(LEGACY_WASM)), {
-      env: { log: () => {} },
-    });
-    const t = new Ghostty(instance, { backend: 'legacy' }).createTerminal(10, 2);
-    const message = "requires the libghostty-vt backend (this instance is 'legacy')";
-    expect(() => t.setSelectionRange({ x: 0, y: 0 }, { x: 1, y: 0 })).toThrow(message);
-    expect(() => t.getSelectionRange()).toThrow(message);
-    expect(() => t.clearSelection()).toThrow(message);
-    expect(() => t.getSelectionText()).toThrow(message);
-    t.free();
   });
 });
 

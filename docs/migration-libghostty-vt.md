@@ -374,6 +374,34 @@ row counts, grid refs and formatting against the active screen. This checkpoint
 does not introduce a JavaScript VT parser or snapshot round-trip workaround to
 claim that gap is fixed.
 
+## Native selection and canvas correctness checkpoint
+
+On the native backend, selection ranges are installed through upstream
+`OPT_SELECTION`; Ghostty owns the tracked endpoints through output, pruning, ED3
+and reflow. The host reads fresh coordinates and uses the native selection formatter
+for copying: soft wraps are joined, wide-character spacers are omitted, and active
+and history graphemes remain complete. `selectAll()` now includes history.
+
+Existing host selection policy remains explicit: `select()` retains its historical
+`viewportY + row` mapping, `selectLines()` uses viewport rows, and select-all highlights
+the full grid rather than only nonblank text. Those are not claims of exact xterm
+coordinate semantics. Existing compatibility assertions remain unchanged. Native
+pruning remaps lost endpoints to the oldest retained cell; if both endpoints are
+pruned, a one-cell selection remains, matching the pinned core. ED3 likewise remaps
+endpoints. Screen switches and RIS clear the native selection without synthesizing
+a new host `onSelectionChange` event. Legacy selection behavior is unchanged.
+
+The shared canvas renderer snaps fill edges to device pixels, including backgrounds,
+selection and cursor fills. Incremental redraws restore neighboring glyph ink only
+inside repainted row bands, matching full-frame drawing order without discarding
+dirty-row optimization. Both engines pass the original fractional-DPR seam and
+incremental-overflow assertions, and the eight reviewed images are unchanged.
+
+Three core selection gaps and five browser selection gaps are promoted unchanged
+on native. The two rendering gaps are promoted on both engines. Legacy rejection
+coverage for native selection methods runs in the existing artifact-selected facade
+scenario, not in native-only unit tests, so native CI does not need the legacy WASM.
+
 ## Commands
 
 ```bash

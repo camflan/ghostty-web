@@ -82,24 +82,24 @@
     },
     {
       "id": "api.select-wide-characters",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 (js-layer, gap on both engines): Selection text appends a space for each wide-character spacer cell"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 (js-layer, legacy gap): Selection text appends a space for each wide-character spacer cell"
     },
     {
       "id": "api.select-soft-wrapped-line",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 (js-layer, gap on both engines): Selection text always joins rows with a newline, even across soft wraps"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 (js-layer, legacy gap): Selection text always joins rows with a newline, even across soft wraps"
     },
     {
       "id": "api.select-all-includes-history",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 (js-layer, gap on both engines): selectAll uses viewport-relative rows starting at history row 0, so it selects only the first screenful of history"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 (js-layer, legacy gap): selectAll uses viewport-relative rows starting at history row 0, so it selects only the first screenful of history"
     },
     {
       "id": "api.get-mode",

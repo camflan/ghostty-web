@@ -17,6 +17,10 @@ describe('facade capabilities', () => {
             () => terminal.getKittyKeyboardFlags(),
             () => terminal.setDefaultCursorStyle('bar', false),
             () => encoder.syncFromTerminal(terminal),
+            () => terminal.setSelectionRange({ x: 0, y: 0 }, { x: 1, y: 0 }),
+            () => terminal.getSelectionRange(),
+            () => terminal.clearSelection(),
+            () => terminal.getSelectionText(),
           ];
           const failures = actions.map((action) => {
             try {

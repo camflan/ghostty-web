@@ -151,10 +151,9 @@
     },
     {
       "id": "dpr.background-run-has-no-seams-at-1-25",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "RT-05 [js-layer]: Per-cell background rects land on fractional device pixels at DPR 1.25 and anti-alias, leaving seams at every non-integer cell boundary (pinned Chromium, 9px cells). (provenance: tests/gaps/browser/history/known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "dpr.idle-renders-do-not-resize-at-2",
@@ -257,10 +256,9 @@
     },
     {
       "id": "incremental.overflow-ink-matches-full-render",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "RT-04 [js-layer]: Redrawing a dirty row's neighbour clears that neighbour's band, erasing mark ink that overflows from the undrawn row below; incremental != full. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "incremental.seeded-edits-match-full-render",
@@ -295,10 +293,10 @@
     },
     {
       "id": "mouse.drag-selects-wide-characters",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 [js-layer]: Selection text extraction emits a space for each wide-character spacer cell. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 [js-layer]: Selection text extraction emits a space for each wide-character spacer cell. (provenance: tests/gaps/browser/history/known-failures.json)"
     },
     {
       "id": "options.ctor-theme-colors",
@@ -614,31 +612,31 @@
     },
     {
       "id": "selection.soft-wrap-copies-without-newline",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 [js-layer]: SelectionManager joins every row with \\n, including soft-wrapped continuations; Ghostty's selection string unwraps soft wraps. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 [js-layer]: SelectionManager joins every row with \\n, including soft-wrapped continuations; Ghostty's selection string unwraps soft wraps. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
     },
     {
       "id": "selection.wide-and-combining-in-history",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 [js-layer]: In history rows the combining mark is copied correctly, but the wide character's spacer cell is copied as an extra space. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 [js-layer]: In history rows the combining mark is copied correctly, but the wide character's spacer cell is copied as an extra space. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
     },
     {
       "id": "selection.survives-history-pruning",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08/SW-07 [js-layer]: Selection stores absolute row indices without rebasing after historical pages are pruned. An explicit 1000-line budget and 1000+200-line fixture prune on both engines while retaining line 999; the selection becomes empty instead of retaining that text. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08/SW-07 [js-layer]: Selection stores absolute row indices without rebasing after historical pages are pruned. An explicit 1000-line budget and 1000+200-line fixture prune on both engines while retaining line 999; the selection becomes empty instead of retaining that text. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
     },
     {
       "id": "selection.reflow-keeps-selected-content",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-08 [js-layer]: Selection coordinates are not remapped on resize/reflow; after the first line rewraps, the same absolute row/columns select different content. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "reason": "Legacy-only gap; terminal-owned native selection and formatting pass the unchanged assertion. WEB-08 [js-layer]: Selection coordinates are not remapped on resize/reflow; after the first line rewraps, the same absolute row/columns select different content. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
     },
     {
       "id": "sync.mode-2026-state-tracked",
