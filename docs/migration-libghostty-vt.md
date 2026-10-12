@@ -95,16 +95,16 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including the post-checkpoint native keyboard and mouse slices, was validated on
-**2026-10-12**:
+The required baseline, including native keyboard, mouse, paste/focus routing and
+OSC 8 activation safety, was validated on **2026-10-12**:
 
-- **835 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **307 native / 274 legacy passes** (249 / 216 behavior cases plus
+- **916 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core: **313 native / 274 legacy passes** (255 / 216 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **91 native / 79 legacy passes**, zero skips, retries or flaky
+- Required browser: **96 native / 80 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
-- Opt-in core gaps: **19 native / 54 legacy failures**. Opt-in browser gaps:
-  **18 native / 30 legacy failures**. Every gap run exited **1**; these are open
+- Opt-in core gaps: **13 native / 54 legacy failures**. Opt-in browser gaps:
+  **15 native / 31 legacy failures**. Every gap run exited **1**; these are open
   defects/parity requirements, not passing regression coverage. Counts across
   lanes overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
@@ -315,6 +315,30 @@ than appearing at the native app's exact in-stream position; reentrant host list
 can also interleave focus events with replies. The host does not add a second VT
 parser to imitate these cases. Exact parity needs an upstream focused-state option
 with native report-on-enable, or a mode-change hook.
+
+## Built-in OSC 8 activation safety
+
+OSC 8 targets are untrusted terminal output. The built-in provider now opens only
+absolute URLs using the protocol forms already recognized by `UrlRegexProvider`:
+HTTP(S), mailto, FTP, SSH, Git, tel, magnet, Gemini, Gopher and news. A URL must pass
+both the prefix policy and the URL parser; the validated normalized URL is opened.
+Executable/document schemes (including javascript, data, file and blob), unknown
+custom schemes, relative references, malformed URLs, spaces and control-byte
+obfuscation are refused. Ctrl/Cmd activation and `noopener,noreferrer` remain
+required. Refused links retain their ranges so regex detection cannot override an
+explicit OSC 8 link. Custom providers retain their own activation policy.
+
+Forty-nine provider tests cover allowed/refused targets, normalization, modifiers,
+active/history lookups and range precedence. The original javascript-activation
+browser gap now passes unchanged and is required on both engines. This is a host
+security policy, not another terminal parser or an upstream WASM patch.
+
+The completed paste/focus live smoke used Chromium, the loopback demo WebSocket
+and a real raw-mode PTY. Six byte-exact checks passed: unbracketed paste, bracketed
+paste, report on observable focus-mode enable, blur, focus, and no focus reports
+after disable. No browser error or WASM trap was recorded; smoke services were
+stopped afterward. Native OS clipboard dialogs, real IME and other browser/platform
+manual gates remain unverified.
 
 ## Commands
 

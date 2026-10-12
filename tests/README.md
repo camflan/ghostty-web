@@ -19,22 +19,22 @@ bug reproducers**. Existing bugs and future-parity requirements are in a separat
 explicitly selected [gap suite](gaps/README.md). A gap failure is a real failure,
 not a passing test.
 
-Validated on 2026-10-12, including the separate native keyboard and mouse routing
-slices after migration checkpoint `ffe8b66`:
+Validated on 2026-10-12, including the native keyboard, mouse, paste/focus routing
+slices and OSC 8 activation safety after migration checkpoint `ffe8b66`:
 
 | Lane                                             | Native (`web-candidate`) | Legacy (`web-pinned`) |
 | ------------------------------------------------ | ------------------------ | --------------------- |
-| Required core behavior                           | 249 passed               | 216 passed            |
+| Required core behavior                           | 255 passed               | 216 passed            |
 | Core controls and harness checks                 | 58 passed                | 58 passed             |
-| Required browser behavior                        | 85 passed                | 73 passed             |
+| Required browser behavior                        | 90 passed                | 74 passed             |
 | Browser controls                                 | 6 passed                 | 6 passed              |
-| Opt-in core gaps                                 | 19 failed, exit 1        | 54 failed, exit 1     |
-| Opt-in browser gaps                              | 18 failed, exit 1        | 30 failed, exit 1     |
+| Opt-in core gaps                                 | 13 failed, exit 1        | 54 failed, exit 1     |
+| Opt-in browser gaps                              | 15 failed, exit 1        | 31 failed, exit 1     |
 | Unsupported core ABI cases (metadata, not tests) | 3                        | 1                     |
 
-The full default `bun test` run passes **835 tests**, including the native core
+The full default `bun test` run passes **916 tests**, including the native core
 lane above, existing public-library tests and harness/policy checks. Browser runs
-use the canonical container: **91 native / 79 legacy passes**, zero skips, retries
+use the canonical container: **96 native / 80 legacy passes**, zero skips, retries
 or flaky results. All eight reviewed scene images remain unchanged. Core matrix
 reports list gaps and unsupported ABI scope separately from executed pass/fail
 counts; no required cases are missing.
@@ -51,9 +51,12 @@ gaps plus the browser Alt-key gap on native only, without changing their asserti
 The native mouse slice adds ten bridge tests, nine DOM unit tests and two browser
 behavior cases, and promotes eight core gaps plus the browser wheel gap unchanged
 on native. Application-drag selection suppression passes on both engines; the new
-Shift-local selection case reproduces a legacy-only gap. The current catalogues
-contain 271 core and 109 browser declarations (103 browser behavior cases plus
-6 controls). No existing required case was demoted.
+Shift-local selection case reproduces a legacy-only gap. The paste/focus slices add
+26 bridge/host unit tests and two browser cases, promoting six core and two browser
+gaps unchanged on native. The OSC 8 safety fix adds 49 provider tests and promotes
+its browser gap on both engines. The current catalogues contain 271 core and 111
+browser declarations (105 browser behavior cases plus 6 controls). No existing
+required case was demoted.
 
 See [the migration notes](../docs/migration-libghostty-vt.md) for independent
 reference/package validation, improvements and the approved native scrollback

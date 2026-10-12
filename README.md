@@ -76,6 +76,17 @@ retention guarantee. `scrollback: 0` disables history. Buffer APIs report the ro
 actually retained. Exact xterm-style retention is deferred rather than emulated
 with a hidden JavaScript clamp.
 
+## Native paste and focus input
+
+The native backend delegates paste sanitization and mode-2004 framing to Ghostty.
+Unbracketed LF becomes CR (CRLF becomes CRCR); unsafe control bytes are replaced
+with spaces. Multiline paste remains automatic—there is no new confirmation UI,
+and newlines can still execute commands in an unbracketed shell.
+
+Mode 1004 reports terminal focus changes without treating internal textarea focus
+transfers as a loss/gain pair. The pinned C API limits exact report-on-enable
+behavior; see the [migration notes](./docs/migration-libghostty-vt.md).
+
 ## Mouse input
 
 The native backend uses Ghostty's mouse encoder for application tracking. Hold
@@ -87,6 +98,14 @@ and UTF8 mouse reports are lossless. Classic X10 reports containing invalid UTF-
 high-bit bytes are withheld rather than corrupted; full raw-byte X10 transport
 remains unsupported. See the [migration notes](./docs/migration-libghostty-vt.md)
 for scope and remaining limitations.
+
+## Link activation safety
+
+The built-in OSC 8 provider opens only absolute URLs using its recognized built-in
+protocols. Executable/document schemes such as `javascript:`, `data:`, `file:` and
+`blob:`, unknown schemes, relative targets and control-obfuscated URLs are blocked.
+Ctrl/Cmd is still required. Embedders needing custom protocols can supply a custom
+link provider with their own validation and activation policy.
 
 ## Development
 

@@ -46,10 +46,9 @@
     },
     {
       "id": "link.osc8-javascript-scheme-not-opened",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "IN-14 [js-layer]: OSC 8 activation calls window.open for any URI scheme, including javascript:. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "comparator.detects-single-cell-edits-at-1",
