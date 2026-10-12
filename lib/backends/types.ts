@@ -16,9 +16,33 @@ import type {
   GhosttyTerminalConfig,
   KeyEncoderOption,
   KeyEvent,
+  Mods,
   RenderStateColors,
   RenderStateCursor,
 } from '../types';
+
+/**
+ * One host pointer event for the native mouse encoder (libghostty-vt only).
+ * The encoder decides from the terminal's current modes whether and how the
+ * event is reported (tracking mode, format, motion dedup, out-of-view drops).
+ */
+export interface NativeMouseEvent {
+  action: 'press' | 'release' | 'motion';
+  /** `null` = motion without a pressed button. `four`..`seven` are wheel buttons. */
+  button: 'left' | 'middle' | 'right' | 'four' | 'five' | 'six' | 'seven' | 'eight' | 'nine' | null;
+  /** CSS pixels relative to the canvas origin; negative or beyond the grid is allowed. */
+  x: number;
+  y: number;
+  /** Integer CSS cell metrics; the grid is `cols * cellWidth` x `rows * cellHeight`, unpadded. */
+  cellWidth: number;
+  cellHeight: number;
+  mods: Mods;
+  /**
+   * Whether a physical button is held after this DOM event (true for a press,
+   * false for the release of the last button). Wheel events are not held buttons.
+   */
+  anyButtonPressed: boolean;
+}
 
 /** Identity of the engine behind a facade. */
 export type BackendKind = 'legacy' | 'libghostty-vt';
@@ -87,6 +111,14 @@ export interface TerminalBackend {
   getKittyKeyboardFlags?(): number;
   /** Default cursor applied now if the program hasn't chosen one, and on reset/DECSCUSR 0. */
   setDefaultCursorStyle?(style: 'block' | 'underline' | 'bar', blink: boolean): void;
+  /**
+   * Encode a host mouse event for the terminal's current mouse modes. Returns
+   * an owned copy of the raw bytes (X10 may contain bytes >= 0x80 that are not
+   * UTF-8); empty when the event is not reported.
+   */
+  encodeMouseEvent?(event: NativeMouseEvent): Uint8Array;
+  /** Forget the last reported motion cell (the next motion is reported even in the same cell). */
+  resetMouseEncoder?(): void;
 }
 
 export interface KeyEncoderBackend {

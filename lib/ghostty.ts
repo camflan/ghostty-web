@@ -10,7 +10,13 @@
  */
 
 import { type BackendKind, type GhosttyLoadOptions, backendFor } from './backends';
-import type { KeyEncoderBackend, RawExports, TerminalBackend, VtBackend } from './backends/types';
+import type {
+  KeyEncoderBackend,
+  NativeMouseEvent,
+  RawExports,
+  TerminalBackend,
+  VtBackend,
+} from './backends/types';
 import {
   CellFlags,
   type Cursor,
@@ -358,6 +364,28 @@ export class GhosttyTerminal {
     this.assertLive();
     if (!this.impl.setDefaultCursorStyle) throw nativeOnly(this.kind, 'setDefaultCursorStyle');
     this.impl.setDefaultCursorStyle(style, blink);
+  }
+
+  /**
+   * @internal libghostty-vt only: encode a pointer event for the terminal's
+   * current mouse modes with the native encoder (tracking mode, format, motion
+   * dedup, out-of-view handling). Returns an owned copy of the raw bytes, which
+   * may not be valid UTF-8 (X10 coordinates >= 95); empty when not reported.
+   */
+  encodeMouseEvent(event: NativeMouseEvent): Uint8Array {
+    this.assertLive();
+    if (!this.impl.encodeMouseEvent) throw nativeOnly(this.kind, 'encodeMouseEvent');
+    return this.impl.encodeMouseEvent(event);
+  }
+
+  /**
+   * @internal libghostty-vt only: forget the last reported motion cell, so the
+   * next motion is reported even within the same cell.
+   */
+  resetMouseEncoder(): void {
+    this.assertLive();
+    if (!this.impl.resetMouseEncoder) throw nativeOnly(this.kind, 'resetMouseEncoder');
+    this.impl.resetMouseEncoder();
   }
 
   // ==========================================================================

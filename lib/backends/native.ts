@@ -28,7 +28,7 @@ import {
   type RenderStateCursor,
 } from '../types';
 import { type NativeAbi, type NativeLayout, bitsOf } from './native-abi';
-import type { KeyEncoderBackend, TerminalBackend, VtBackend } from './types';
+import type { KeyEncoderBackend, NativeMouseEvent, TerminalBackend, VtBackend } from './types';
 
 /** Defaults the legacy engine rendered when no theme color was configured. */
 const LEGACY_DEFAULT_FOREGROUND = 0xcccccc;
@@ -40,6 +40,34 @@ const GRAPHEME_CLUSTER_MODE = 2027;
 const WRITE_CHUNK = 64 * 1024;
 /** `readResponse()` returns at most this many bytes per call, as the legacy engine did. */
 const RESPONSE_CHUNK = 256;
+/**
+ * Native mouse positions and screen sizes are f32, exact for integers below
+ * 2^24. The grid must stay below it; positions are clamped to it (and to
+ * 65535.5 cells) so the encoder's u16 cell and i32 pixel conversions stay
+ * defined. Neither bound is reachable by a real pointer.
+ */
+const MOUSE_PX_LIMIT = 2 ** 24;
+
+const MOUSE_ACTIONS = {
+  press: 'PRESS',
+  release: 'RELEASE',
+  motion: 'MOTION',
+} as const satisfies Record<NativeMouseEvent['action'], keyof NativeLayout['mouseAction']>;
+
+const MOUSE_BUTTONS = {
+  left: 'LEFT',
+  middle: 'MIDDLE',
+  right: 'RIGHT',
+  four: 'FOUR',
+  five: 'FIVE',
+  six: 'SIX',
+  seven: 'SEVEN',
+  eight: 'EIGHT',
+  nine: 'NINE',
+} as const satisfies Record<
+  NonNullable<NativeMouseEvent['button']>,
+  keyof NativeLayout['mouseButton']
+>;
 
 /** Optional presence bits added to the public config (legacy ignores them). */
 type ColorPresence = {
@@ -158,6 +186,8 @@ class Scratch {
   readonly point: number;
   readonly gridRef: number;
   readonly mode: number;
+  readonly mouseSize: number;
+  readonly mousePosition: number;
 
   constructor(abi: NativeAbi) {
     const L = abi.layout;
@@ -179,6 +209,8 @@ class Scratch {
       point: take(L.point.size),
       gridRef: take(L.gridRefSize),
       mode: take(L.modeConfig.size),
+      mouseSize: take(L.mouseEncoderSize.size),
+      mousePosition: take(L.mousePosition.size),
     };
     this.size = offset;
     this.base = abi.alloc(offset);
@@ -193,6 +225,8 @@ class Scratch {
     this.point = this.base + rel.point;
     this.gridRef = this.base + rel.gridRef;
     this.mode = this.base + rel.mode;
+    this.mouseSize = this.base + rel.mouseSize;
+    this.mousePosition = this.base + rel.mousePosition;
   }
 }
 
@@ -229,6 +263,20 @@ function checkSize(cols: number, rows: number): void {
       throw new RangeError(`libghostty-vt: ${name} must be an integer in 1..65535, got ${value}`);
     }
   }
+}
+
+function hasOwn<T extends object>(table: T, key: unknown): key is keyof T {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key);
+}
+
+/**
+ * Clamp a finite CSS pixel coordinate into the range the native encoder
+ * converts without overflow (see MOUSE_PX_LIMIT). The upper bound stays past
+ * the grid edge (half a cell beyond 65535 cells), so in/out-of-view decisions
+ * and clamped cells are unchanged.
+ */
+function clampMousePx(value: number, cell: number): number {
+  return Math.max(-MOUSE_PX_LIMIT, Math.min(value, MOUSE_PX_LIMIT, 65535.5 * cell));
 }
 
 function blankCell(): GhosttyCell {
@@ -274,6 +322,23 @@ export class NativeTerminal implements TerminalBackend {
   /** Dedicated mouse encoder/event used only to probe the native tracking state. */
   private mouseProbe = 0;
   private mouseProbeEvent = 0;
+  /**
+   * Encoder/event for real host input, created on first use. Kept apart from
+   * the probe because its motion-dedup state (last reported cell) persists
+   * between DOM events, and every setopt_from_terminal call clears it.
+   */
+  private mouseEncoder = 0;
+  private mouseEvent = 0;
+  private readonly mouseOut: GrowBuffer;
+  /** Tracking mode/format must be re-read from the terminal (after any write). */
+  private mouseModesStale = true;
+  /** Geometry last applied with OPT_SIZE (which also clears dedup); null = not yet. */
+  private mouseGeometry: {
+    cols: number;
+    rows: number;
+    cellWidth: number;
+    cellHeight: number;
+  } | null = null;
 
   // ---- decoded viewport snapshot ----
   private stale = true;
@@ -318,6 +383,7 @@ export class NativeTerminal implements TerminalBackend {
     this.input = new GrowBuffer(this.abi);
     this.codepoints = new GrowBuffer(this.abi);
     this.uri = new GrowBuffer(this.abi);
+    this.mouseOut = new GrowBuffer(this.abi);
     const ex = this.abi.exports;
     try {
       this.handle = this.abi.newHandle(ex.ghostty_terminal_new, 'ghostty_terminal_new', cols, rows);
@@ -380,6 +446,9 @@ export class NativeTerminal implements TerminalBackend {
     } finally {
       this.backend.writing = false;
       this.stale = true;
+      // Any write may change mouse modes (set/reset, RIS, ...); re-read them
+      // before the next mouse event. Dedup survives between writes.
+      this.mouseModesStale = true;
     }
     this.backend.rethrowCallbackError();
   }
@@ -490,6 +559,10 @@ export class NativeTerminal implements TerminalBackend {
     if (this.mouseProbeEvent) ex.ghostty_mouse_event_free(this.mouseProbeEvent);
     if (this.mouseProbe) ex.ghostty_mouse_encoder_free(this.mouseProbe);
     this.mouseProbe = this.mouseProbeEvent = 0;
+    if (this.mouseEvent) ex.ghostty_mouse_event_free(this.mouseEvent);
+    if (this.mouseEncoder) ex.ghostty_mouse_encoder_free(this.mouseEncoder);
+    this.mouseEncoder = this.mouseEvent = 0;
+    this.mouseOut.release();
     if (this.rowCells) ex.ghostty_render_state_row_cells_free(this.rowCells);
     if (this.rowIterator) ex.ghostty_render_state_row_iterator_free(this.rowIterator);
     if (this.renderState) ex.ghostty_render_state_free(this.renderState);
@@ -588,6 +661,143 @@ export class NativeTerminal implements TerminalBackend {
     if (result === L.result.OUT_OF_SPACE) return abi.view().getUint32(s.out2, true) > 0;
     abi.check(result, 'ghostty_mouse_encoder_encode');
     return false;
+  }
+
+  // ==========================================================================
+  // Mouse input
+  // ==========================================================================
+
+  /**
+   * Encode a host mouse event with the persistent native encoder: tracking
+   * mode and format come from the terminal, motion is deduplicated per cell
+   * (TRACK_LAST_CELL), out-of-view events are dropped or clamped natively.
+   * Returns an owned copy of the raw bytes; empty when nothing is reported.
+   */
+  encodeMouseEvent(event: NativeMouseEvent): Uint8Array {
+    const abi = this.abi;
+    const ex = abi.exports;
+    const L = this.L;
+    // Validate everything before touching (or lazily creating) native state.
+    if (!hasOwn(MOUSE_ACTIONS, event.action)) {
+      throw new RangeError(`libghostty-vt: unknown mouse action ${String(event.action)}`);
+    }
+    if (event.button !== null && !hasOwn(MOUSE_BUTTONS, event.button)) {
+      throw new RangeError(`libghostty-vt: unknown mouse button ${String(event.button)}`);
+    }
+    const { cellWidth, cellHeight } = event;
+    for (const [name, value] of [
+      ['cellWidth', cellWidth],
+      ['cellHeight', cellHeight],
+    ] as const) {
+      if (!Number.isInteger(value) || value < 1) {
+        throw new RangeError(
+          `libghostty-vt: mouse ${name} must be a positive integer, got ${value}`
+        );
+      }
+    }
+    if (this.cols * cellWidth >= MOUSE_PX_LIMIT || this.rows * cellHeight >= MOUSE_PX_LIMIT) {
+      throw new RangeError(
+        `libghostty-vt: mouse grid ${this.cols}x${cellWidth} by ${this.rows}x${cellHeight} px exceeds ${MOUSE_PX_LIMIT} px`
+      );
+    }
+    if (!Number.isFinite(event.x) || !Number.isFinite(event.y)) {
+      throw new RangeError(
+        `libghostty-vt: mouse position must be finite, got ${event.x}, ${event.y}`
+      );
+    }
+    const x = clampMousePx(event.x, cellWidth);
+    const y = clampMousePx(event.y, cellHeight);
+
+    this.ensureMouseEncoder();
+    this.syncMouseEncoder(cellWidth, cellHeight);
+    const encoder = this.mouseEncoder;
+    const ev = this.mouseEvent;
+    const s = this.scratch!;
+    abi.bytes()[s.out] = event.anyButtonPressed ? 1 : 0;
+    ex.ghostty_mouse_encoder_setopt(encoder, L.mouseEncoderOption.ANY_BUTTON_PRESSED, s.out);
+    ex.ghostty_mouse_event_set_action(ev, L.mouseAction[MOUSE_ACTIONS[event.action]]);
+    if (event.button === null) ex.ghostty_mouse_event_clear_button(ev);
+    else ex.ghostty_mouse_event_set_button(ev, L.mouseButton[MOUSE_BUTTONS[event.button]]);
+    ex.ghostty_mouse_event_set_mods(ev, event.mods & 0xffff);
+    const P = L.mousePosition;
+    const view = abi.view();
+    view.setFloat32(s.mousePosition + P.x, x, true);
+    view.setFloat32(s.mousePosition + P.y, y, true);
+    ex.ghostty_mouse_event_set_position(ev, s.mousePosition);
+
+    // A failed (OUT_OF_SPACE) encode restores the dedup cell natively, so one
+    // retry with the reported size encodes the same event exactly once.
+    let ptr = this.mouseOut.ensure(64);
+    let result = ex.ghostty_mouse_encoder_encode(encoder, ev, ptr, this.mouseOut.cap, s.out2);
+    let len = abi.view().getUint32(s.out2, true);
+    if (result === L.result.OUT_OF_SPACE && len > this.mouseOut.cap) {
+      ptr = this.mouseOut.ensure(len);
+      result = ex.ghostty_mouse_encoder_encode(encoder, ev, ptr, this.mouseOut.cap, s.out2);
+      len = abi.view().getUint32(s.out2, true);
+    }
+    abi.check(result as number, 'ghostty_mouse_encoder_encode');
+    return abi.bytes().slice(ptr, ptr + len);
+  }
+
+  /** Clear the input encoder's last reported cell; no-op before the first mouse event. */
+  resetMouseEncoder(): void {
+    if (this.mouseEncoder) this.abi.exports.ghostty_mouse_encoder_reset(this.mouseEncoder);
+  }
+
+  /** Create the input encoder/event pair, all or nothing. */
+  private ensureMouseEncoder(): void {
+    if (this.mouseEncoder) return;
+    const abi = this.abi;
+    const ex = abi.exports;
+    const encoder = abi.newHandle(ex.ghostty_mouse_encoder_new, 'ghostty_mouse_encoder_new');
+    let event = 0;
+    try {
+      event = abi.newHandle(ex.ghostty_mouse_event_new, 'ghostty_mouse_event_new');
+      const s = this.scratch!;
+      abi.bytes()[s.out] = 1;
+      ex.ghostty_mouse_encoder_setopt(encoder, this.L.mouseEncoderOption.TRACK_LAST_CELL, s.out);
+    } catch (error) {
+      if (event) ex.ghostty_mouse_event_free(event);
+      ex.ghostty_mouse_encoder_free(encoder);
+      throw error;
+    }
+    this.mouseEncoder = encoder;
+    this.mouseEvent = event;
+    this.mouseModesStale = true;
+    this.mouseGeometry = null;
+  }
+
+  /**
+   * Bring the input encoder up to date. Both steps clear native dedup, so each
+   * runs only when needed: modes after a write, OPT_SIZE when the grid or cell
+   * metrics changed.
+   */
+  private syncMouseEncoder(cellWidth: number, cellHeight: number): void {
+    const ex = this.abi.exports;
+    if (this.mouseModesStale) {
+      ex.ghostty_mouse_encoder_setopt_from_terminal(this.mouseEncoder, this.handle);
+      this.mouseModesStale = false;
+    }
+    const g = this.mouseGeometry;
+    if (
+      g?.cols === this.cols &&
+      g.rows === this.rows &&
+      g.cellWidth === cellWidth &&
+      g.cellHeight === cellHeight
+    ) {
+      return;
+    }
+    const S = this.L.mouseEncoderSize;
+    const at = this.scratch!.mouseSize;
+    this.abi.bytes().fill(0, at, at + S.size); // zero padding
+    const view = this.abi.view();
+    view.setUint32(at, S.size, true); // sized struct: leading size_t (u32 on wasm32)
+    view.setUint32(at + S.screen_width, this.cols * cellWidth, true);
+    view.setUint32(at + S.screen_height, this.rows * cellHeight, true);
+    view.setUint32(at + S.cell_width, cellWidth, true);
+    view.setUint32(at + S.cell_height, cellHeight, true);
+    ex.ghostty_mouse_encoder_setopt(this.mouseEncoder, this.L.mouseEncoderOption.SIZE, at);
+    this.mouseGeometry = { cols: this.cols, rows: this.rows, cellWidth, cellHeight };
   }
 
   /** Unknown modes report false (the native API answers INVALID_VALUE for them). */

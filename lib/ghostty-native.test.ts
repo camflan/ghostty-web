@@ -7,6 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import type { NativeMouseEvent } from './backends/types';
 import { CellFlags, DirtyState, Ghostty, type GhosttyTerminal, KeyEncoderOption } from './ghostty';
 import { Key, KeyAction, KittyKeyFlags, Mods } from './types';
 
@@ -66,6 +67,27 @@ function patchedExports(patch: (ex: Record<string, unknown>) => void): WebAssemb
   const ex: Record<string, unknown> = { ...nativeInstance().exports };
   patch(ex);
   return { exports: ex } as unknown as WebAssembly.Instance;
+}
+
+/** The module's own `ghostty_type_json()` manifest, parsed. */
+function readManifest(ex: Record<string, unknown>): any {
+  const bytes = new Uint8Array((ex.memory as WebAssembly.Memory).buffer);
+  const start = (ex.ghostty_type_json as () => number)();
+  let end = start;
+  while (bytes[end]) end++;
+  return JSON.parse(new TextDecoder().decode(bytes.subarray(start, end)));
+}
+
+/** Native exports serving a manifest edited by `mutate`. */
+function patchedManifest(mutate: (manifest: any) => void): WebAssembly.Instance {
+  return patchedExports((ex) => {
+    const manifest = readManifest(ex);
+    mutate(manifest);
+    const encoded = new TextEncoder().encode(`${JSON.stringify(manifest)}\0`);
+    const ptr = (ex.ghostty_wasm_alloc as (n: number) => number)(encoded.length);
+    new Uint8Array((ex.memory as WebAssembly.Memory).buffer).set(encoded, ptr);
+    ex.ghostty_type_json = () => ptr;
+  });
 }
 
 test('native DECCOLM preserves the host grid and subsequent last-cell rendering', () => {
@@ -135,24 +157,34 @@ describe('libghostty-vt detection', () => {
   });
 
   test('a manifest layout mismatch throws', () => {
-    const instance = patchedExports((ex) => {
-      const memory = ex.memory as WebAssembly.Memory;
-      const typeJson = ex.ghostty_type_json as () => number;
-      const alloc = ex.ghostty_wasm_alloc as (n: number) => number;
-      const original = (() => {
-        const bytes = new Uint8Array(memory.buffer);
-        const start = typeJson();
-        let end = start;
-        while (bytes[end]) end++;
-        return JSON.parse(new TextDecoder().decode(bytes.subarray(start, end)));
-      })();
-      original.types.GhosttyCell.bits.style_id.width = 15;
-      const encoded = new TextEncoder().encode(`${JSON.stringify(original)}\0`);
-      const ptr = alloc(encoded.length);
-      new Uint8Array(memory.buffer).set(encoded, ptr);
-      ex.ghostty_type_json = () => ptr;
+    const instance = patchedManifest((manifest) => {
+      manifest.types.GhosttyCell.bits.style_id.width = 15;
     });
     expect(() => new Ghostty(instance)).toThrow('GhosttyCell.style_id is 15 bits, expected 16');
+  });
+
+  test('mouse input exports and manifest entries are required', () => {
+    for (const name of [
+      'ghostty_mouse_encoder_setopt',
+      'ghostty_mouse_encoder_reset',
+      'ghostty_mouse_event_clear_button',
+      'ghostty_mouse_event_set_mods',
+      'ghostty_mouse_event_set_position',
+    ]) {
+      const instance = patchedExports((ex) => {
+        ex[name] = undefined;
+      });
+      expect(() => new Ghostty(instance)).toThrow(`missing export ${name}`);
+    }
+    const instance = patchedManifest((manifest) => {
+      manifest.types.GhosttyMouseButton.values.NINE = undefined;
+      manifest.types.GhosttyMouseEncoderOption.values.TRACK_LAST_CELL = undefined;
+      manifest.types.GhosttyMousePosition.fields.y.size = 8;
+      manifest.types.GhosttyMouseEncoderSize.fields.padding_left = undefined;
+    });
+    expect(() => new Ghostty(instance)).toThrow(
+      'missing GhosttyMouseButton.NINE; missing GhosttyMouseEncoderOption.TRACK_LAST_CELL; missing field GhosttyMouseEncoderSize.padding_left; GhosttyMousePosition.y is 8 bytes, expected 4'
+    );
   });
 
   test('modules that are neither engine are rejected', () => {
@@ -647,5 +679,246 @@ describe('libghostty-vt host integration', () => {
       expect([c.fg_default, c.bg_default, ...rgb(c, 'bg')]).toEqual([true, false, 0, 0, 0]);
       expect(t.getScrollbackLength()).toBe(0);
     });
+  });
+});
+
+describe('libghostty-vt mouse input', () => {
+  const CELL_W = 10;
+  const CELL_H = 20;
+  type Button = NativeMouseEvent['button'];
+
+  /** A mouse event at CSS pixel (x, y); a press holds a button unless overridden. */
+  const mouseEvent = (
+    action: NativeMouseEvent['action'],
+    button: Button,
+    x: number,
+    y: number,
+    init: Partial<NativeMouseEvent> = {}
+  ): NativeMouseEvent => ({
+    action,
+    button,
+    x,
+    y,
+    cellWidth: CELL_W,
+    cellHeight: CELL_H,
+    mods: Mods.NONE,
+    anyButtonPressed: action === 'press',
+    ...init,
+  });
+  /** Encoded bytes as a byte-per-char string (never decoded as UTF-8). */
+  const enc = (t: GhosttyTerminal, ...args: Parameters<typeof mouseEvent>) =>
+    Buffer.from(t.encodeMouseEvent(mouseEvent(...args))).toString('latin1');
+  const raw = (t: GhosttyTerminal, ...args: Parameters<typeof mouseEvent>) =>
+    Array.from(t.encodeMouseEvent(mouseEvent(...args)));
+  const CSI_M = [0x1b, 0x5b, 0x4d];
+
+  test('SGR press/release carry modifiers; wheel and extra buttons map by name', () => {
+    withTerm(10, 5, (t) => {
+      expect(enc(t, 'press', 'left', 25, 65)).toBe(''); // no tracking mode yet
+      t.write('\x1b[?1000h\x1b[?1006h');
+      const mods = Mods.SHIFT | Mods.CTRL;
+      expect(enc(t, 'press', 'left', 25, 65, { mods })).toBe('\x1b[<20;3;4M');
+      expect(enc(t, 'release', 'left', 25, 65, { mods, anyButtonPressed: false })).toBe(
+        '\x1b[<20;3;4m'
+      );
+      expect(enc(t, 'press', 'right', 0, 0, { mods: Mods.ALT })).toBe('\x1b[<10;1;1M');
+      expect(enc(t, 'press', 'middle', 95, 95, { mods: Mods.SUPER })).toBe('\x1b[<1;10;5M');
+      const extra: Button[] = ['four', 'five', 'six', 'seven', 'eight', 'nine'];
+      expect(extra.map((b) => enc(t, 'press', b, 5, 5, { anyButtonPressed: false }))).toEqual([
+        '\x1b[<64;1;1M',
+        '\x1b[<65;1;1M',
+        '\x1b[<66;1;1M',
+        '\x1b[<67;1;1M',
+        '\x1b[<128;1;1M',
+        '\x1b[<129;1;1M',
+      ]);
+      // Normal tracking (1000) never reports motion.
+      expect(enc(t, 'motion', 'left', 55, 25, { anyButtonPressed: true })).toBe('');
+      // X10 tracking (9) reports presses only, without modifiers.
+      t.write('\x1b[?1000l\x1b[?9h\x1b[?1006l');
+      expect(raw(t, 'press', 'left', 5, 5, { mods })).toEqual([...CSI_M, 32, 33, 33]);
+      expect(raw(t, 'release', 'left', 5, 5)).toEqual([]);
+    });
+  });
+
+  test('motion is deduplicated per cell until reset; the tracking probe does not interfere', () => {
+    withTerm(10, 5, (t) => {
+      t.write('\x1b[?1003h\x1b[?1006h');
+      const move = (x: number, y: number) => enc(t, 'motion', null, x, y);
+      expect(move(15, 25)).toBe('\x1b[<35;2;2M');
+      expect(move(19, 39)).toBe(''); // same cell, other pixel
+      expect(t.hasMouseTracking()).toBe(true);
+      expect(move(11, 21)).toBe('');
+      expect(move(25, 25)).toBe('\x1b[<35;3;2M');
+      t.resetMouseEncoder();
+      expect(move(25, 25)).toBe('\x1b[<35;3;2M');
+      expect(move(25, 25)).toBe('');
+      // A press records its cell too; motion there is not repeated.
+      expect(enc(t, 'press', 'left', 45, 25)).toBe('\x1b[<0;5;2M');
+      expect(enc(t, 'motion', 'left', 46, 26, { anyButtonPressed: true })).toBe('');
+    });
+  });
+
+  test('motion without a button is reported in any-event mode only', () => {
+    withTerm(10, 5, (t) => {
+      t.write('\x1b[?1002h\x1b[?1006h');
+      expect(enc(t, 'motion', null, 15, 25)).toBe('');
+      expect(enc(t, 'press', 'left', 15, 25)).toBe('\x1b[<0;2;2M');
+      expect(enc(t, 'motion', 'left', 35, 25, { anyButtonPressed: true })).toBe('\x1b[<32;4;2M');
+      t.write('\x1b[?1003h');
+      expect(enc(t, 'motion', null, 45, 25)).toBe('\x1b[<35;5;2M');
+      t.write('\x1b[?1006l'); // legacy format: motion + "no button" (3)
+      expect(raw(t, 'motion', null, 55, 25)).toEqual([...CSI_M, 32 + 35, 32 + 6, 32 + 2]);
+    });
+  });
+
+  test('mode changes, RIS and the alternate screen re-sync modes and dedup', () => {
+    withTerm(10, 5, (t) => {
+      const move = () => enc(t, 'motion', null, 15, 25);
+      t.write('\x1b[?1003h\x1b[?1006h');
+      expect(move()).toBe('\x1b[<35;2;2M');
+      t.write('\x1b[?1003l');
+      expect(move()).toBe('');
+      t.write('\x1b[?1003h');
+      expect(move()).toBe('\x1b[<35;2;2M');
+      t.write('\x1b[?1003l\x1b[?1003h'); // off and on within one write
+      expect(move()).toBe('\x1b[<35;2;2M');
+      t.write('\x1b[?1049h');
+      expect(move()).toBe('\x1b[<35;2;2M');
+      t.write('\x1bc'); // RIS turns tracking off and the format back to X10
+      expect(move()).toBe('');
+      expect(enc(t, 'press', 'left', 15, 25)).toBe('');
+      t.write('\x1b[?1000h');
+      expect(raw(t, 'press', 'left', 15, 25)).toEqual([...CSI_M, 32, 34, 34]);
+    });
+  });
+
+  test('resize and cell metric changes update the geometry (and clear dedup)', () => {
+    withTerm(10, 5, (t) => {
+      t.write('\x1b[?1000h\x1b[?1006h');
+      expect(enc(t, 'press', 'left', 150, 10)).toBe(''); // beyond the 100 px wide grid
+      t.resize(20, 5);
+      expect(enc(t, 'press', 'left', 150, 10)).toBe('\x1b[<0;16;1M');
+      expect(enc(t, 'press', 'left', 150, 10, { cellWidth: 5 })).toBe(''); // 20 x 5 px
+      expect(enc(t, 'press', 'left', 50, 10, { cellWidth: 5, cellHeight: 4 })).toBe(
+        '\x1b[<0;11;3M'
+      );
+      t.write('\x1b[?1003h');
+      const move = () => enc(t, 'motion', null, 15, 25);
+      expect(move()).toBe('\x1b[<35;2;2M');
+      expect(move()).toBe('');
+      t.resize(20, 6);
+      expect(move()).toBe('\x1b[<35;2;2M');
+      expect(move()).toBe('');
+      expect(enc(t, 'motion', null, 15, 25, { cellHeight: 21 })).toBe('\x1b[<35;2;2M');
+    });
+  });
+
+  test('X10 output is raw bytes (not UTF-8); UTF-8 mode extends the range', () => {
+    withTerm(320, 2, (t) => {
+      const at = (col: number) => col * CELL_W + 5;
+      t.write('\x1b[?1000h');
+      expect(raw(t, 'press', 'left', at(200), 5)).toEqual([...CSI_M, 32, 233, 33]);
+      expect(raw(t, 'press', 'left', at(222), 5)).toEqual([...CSI_M, 32, 255, 33]);
+      expect(raw(t, 'press', 'left', at(223), 5)).toEqual([]); // beyond X10
+      expect(raw(t, 'release', 'left', at(200), 5)).toEqual([...CSI_M, 35, 233, 33]);
+      t.write('\x1b[?1005h');
+      expect(raw(t, 'press', 'left', at(200), 5)).toEqual([...CSI_M, 32, 0xc3, 0xa9, 33]);
+      expect(raw(t, 'press', 'left', at(300), 5)).toEqual([...CSI_M, 32, 0xc5, 0x8d, 33]);
+    });
+  });
+
+  test('out of view: presses and free motion drop, held drags clamp, releases report', () => {
+    withTerm(10, 5, (t) => {
+      t.write('\x1b[?1000h\x1b[?1006h');
+      expect(enc(t, 'press', 'left', -5, 10)).toBe('');
+      expect(enc(t, 'release', 'left', -5, 10, { anyButtonPressed: false })).toBe('\x1b[<0;1;1m');
+      t.write('\x1b[?1003h');
+      expect(enc(t, 'press', 'left', 55, 50)).toBe('\x1b[<0;6;3M');
+      const drag = (x: number, y: number) =>
+        enc(t, 'motion', 'left', x, y, { anyButtonPressed: true });
+      expect(drag(-30, 50)).toBe('\x1b[<32;1;3M');
+      expect(drag(-60, 50)).toBe(''); // same clamped cell
+      expect(drag(55, 500)).toBe('\x1b[<32;6;5M');
+      expect(enc(t, 'motion', null, 55, -40)).toBe(''); // nothing held
+      expect(enc(t, 'release', 'left', 500, 50, { anyButtonPressed: false })).toBe('\x1b[<0;10;3m');
+      t.write('\x1b[?1016h'); // SGR pixels report unclamped positions
+      expect(drag(-30.4, 45.6)).toBe('\x1b[<32;-30;46M');
+    });
+  });
+
+  test('invalid events throw before any native mouse state is created', () => {
+    withTerm(10, 5, (t) => {
+      const impl = (t as unknown as { impl: { mouseEncoder: number } }).impl;
+      const bad = (init: Partial<NativeMouseEvent>) => () =>
+        t.encodeMouseEvent(mouseEvent('press', 'left', 5, 5, init));
+      expect(bad({ x: Number.NaN })).toThrow('mouse position must be finite');
+      expect(bad({ y: Number.POSITIVE_INFINITY })).toThrow('mouse position must be finite');
+      expect(bad({ cellWidth: 0 })).toThrow('mouse cellWidth must be a positive integer');
+      expect(bad({ cellHeight: 1.5 })).toThrow('mouse cellHeight must be a positive integer');
+      expect(bad({ cellWidth: 2 ** 24 })).toThrow('exceeds 16777216 px');
+      expect(bad({ action: 'click' as never })).toThrow('unknown mouse action click');
+      expect(bad({ button: 'toString' as never })).toThrow('unknown mouse button toString');
+      t.resetMouseEncoder(); // no-op before first use
+      expect(impl.mouseEncoder).toBe(0);
+      // Far but finite positions are clamped into the encoder's defined range.
+      t.write('\x1b[?1003h\x1b[?1016h');
+      expect(enc(t, 'motion', 'left', 1e12, -1e12, { anyButtonPressed: true })).toMatch(
+        /^\x1b\[<32;\d+;-\d+M$/
+      );
+      expect(impl.mouseEncoder).not.toBe(0);
+    });
+  });
+
+  test('bytes are owned copies; OUT_OF_SPACE retries once; setup failure frees partial state', () => {
+    const OUT_OF_SPACE = readManifest(nativeInstance().exports as Record<string, unknown>).types
+      .GhosttyResult.values.OUT_OF_SPACE;
+    let failEvent = true;
+    let fakeNeed = 0;
+    const caps: number[] = [];
+    let encodersFreed = 0;
+    const instance = patchedExports((ex) => {
+      const memory = ex.memory as WebAssembly.Memory;
+      const newEvent = ex.ghostty_mouse_event_new as (a: number, b: number) => number;
+      const freeEncoder = ex.ghostty_mouse_encoder_free as (h: number) => void;
+      const encode = ex.ghostty_mouse_encoder_encode as (...a: number[]) => number;
+      ex.ghostty_mouse_event_new = (a: number, b: number) => (failEvent ? -1 : newEvent(a, b));
+      ex.ghostty_mouse_encoder_free = (h: number) => {
+        encodersFreed++;
+        freeEncoder(h);
+      };
+      ex.ghostty_mouse_encoder_encode = (
+        e: number,
+        ev: number,
+        buf: number,
+        cap: number,
+        out: number
+      ) => {
+        caps.push(cap);
+        if (fakeNeed > cap) {
+          new DataView(memory.buffer).setUint32(out, fakeNeed, true);
+          return OUT_OF_SPACE;
+        }
+        return encode(e, ev, buf, cap, out);
+      };
+    });
+    const t = new Ghostty(instance).createTerminal(10, 5);
+    t.write('\x1b[?1003h\x1b[?1006h');
+    expect(() => enc(t, 'press', 'left', 15, 25)).toThrow('ghostty_mouse_event_new failed');
+    expect(encodersFreed).toBe(1);
+    failEvent = false;
+    const bytes = t.encodeMouseEvent(mouseEvent('press', 'left', 15, 25));
+    expect(bytes.buffer.byteLength).toBe(bytes.length); // a fresh buffer, not WASM memory
+    bytes[0] = 0;
+    expect(enc(t, 'release', 'left', 15, 25, { anyButtonPressed: false })).toBe('\x1b[<0;2;2m');
+    fakeNeed = 100;
+    caps.length = 0;
+    expect(enc(t, 'motion', null, 35, 25)).toBe('\x1b[<35;4;2M');
+    expect(caps).toEqual([64, 128]);
+    expect(enc(t, 'motion', null, 35, 25)).toBe(''); // reported once, dedup kept
+    t.free();
+    expect(encodersFreed).toBe(2);
+    expect(() => enc(t, 'motion', null, 5, 5)).toThrow('GhosttyTerminal has been freed');
+    expect(() => t.resetMouseEncoder()).toThrow('GhosttyTerminal has been freed');
   });
 });

@@ -69,12 +69,17 @@ const REQUIRED_EXPORTS = {
   ghostty_key_encoder_setopt_from_terminal: 2,
   ghostty_mouse_encoder_new: 2,
   ghostty_mouse_encoder_free: 1,
+  ghostty_mouse_encoder_setopt: 3,
   ghostty_mouse_encoder_setopt_from_terminal: 2,
+  ghostty_mouse_encoder_reset: 1,
   ghostty_mouse_encoder_encode: 5,
   ghostty_mouse_event_new: 2,
   ghostty_mouse_event_free: 1,
   ghostty_mouse_event_set_action: 2,
   ghostty_mouse_event_set_button: 2,
+  ghostty_mouse_event_clear_button: 1,
+  ghostty_mouse_event_set_mods: 2,
+  ghostty_mouse_event_set_position: 2,
 } as const;
 
 export type NativeExports = Record<keyof typeof REQUIRED_EXPORTS, WasmFn> & {
@@ -246,6 +251,7 @@ function resolveLayout(r: Resolver) {
     'GhosttyRenderStateCursor',
     'GhosttyStyle',
     'GhosttyGridRef',
+    'GhosttyMouseEncoderSize',
   ]) {
     r.sized(t);
   }
@@ -345,8 +351,40 @@ function resolveLayout(r: Resolver) {
     wide: r.enums('GhosttyCellWide', ['NARROW', 'WIDE', 'SPACER_TAIL', 'SPACER_HEAD'] as const),
     styleColorTag: r.enums('GhosttyStyleColorTag', ['NONE', 'PALETTE', 'RGB'] as const),
     underline: r.enums('GhosttySgrUnderline', ['NONE'] as const),
-    mouseAction: r.enums('GhosttyMouseAction', ['PRESS'] as const),
-    mouseButton: r.enums('GhosttyMouseButton', ['LEFT'] as const),
+    mouseAction: r.enums('GhosttyMouseAction', ['PRESS', 'RELEASE', 'MOTION'] as const),
+    mouseButton: r.enums('GhosttyMouseButton', [
+      'LEFT',
+      'RIGHT',
+      'MIDDLE',
+      'FOUR',
+      'FIVE',
+      'SIX',
+      'SEVEN',
+      'EIGHT',
+      'NINE',
+    ] as const),
+    mouseEncoderOption: r.enums('GhosttyMouseEncoderOption', [
+      'SIZE',
+      'ANY_BUTTON_PRESSED',
+      'TRACK_LAST_CELL',
+    ] as const),
+    mouseEncoderSize: {
+      size: r.size('GhosttyMouseEncoderSize'),
+      ...r.struct('GhosttyMouseEncoderSize', {
+        screen_width: 4,
+        screen_height: 4,
+        cell_width: 4,
+        cell_height: 4,
+        padding_top: 4,
+        padding_bottom: 4,
+        padding_right: 4,
+        padding_left: 4,
+      }),
+    },
+    mousePosition: {
+      size: r.size('GhosttyMousePosition'),
+      ...r.struct('GhosttyMousePosition', { x: 4, y: 4 }),
+    },
     sizeReport: {
       size: r.size('GhosttySizeReportSize'),
       ...r.struct('GhosttySizeReportSize', { rows: 2, columns: 2, cell_width: 4, cell_height: 4 }),
