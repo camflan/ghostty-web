@@ -12,6 +12,7 @@
 import { type BackendKind, type GhosttyLoadOptions, backendFor } from './backends';
 import type {
   KeyEncoderBackend,
+  NativeHostEvent,
   NativeMouseEvent,
   RawExports,
   TerminalBackend,
@@ -408,6 +409,29 @@ export class GhosttyTerminal {
     this.assertLive();
     if (!this.impl.encodeFocus) throw nativeOnly(this.kind, 'encodeFocus');
     return this.impl.encodeFocus(focused);
+  }
+
+  /**
+   * @internal libghostty-vt only: from now on, queue every bell (BEL executed
+   * by the parser) and title change (OSC 0/2) for `takeHostEvents()`.
+   * Idempotent. Without it nothing is queued and `readResponse()` is unchanged.
+   */
+  enableHostEvents(): void {
+    this.assertLive();
+    if (!this.impl.enableHostEvents) throw nativeOnly(this.kind, 'enableHostEvents');
+    this.impl.enableHostEvents();
+  }
+
+  /**
+   * @internal libghostty-vt only: remove and return all pending replies and
+   * queued bells/titles in the order the parser produced them. Reply chunks
+   * are what `readResponse()` would return, split where an event occurred.
+   * Nothing here calls back into host code; the caller dispatches.
+   */
+  takeHostEvents(): NativeHostEvent[] {
+    this.assertLive();
+    if (!this.impl.takeHostEvents) throw nativeOnly(this.kind, 'takeHostEvents');
+    return this.impl.takeHostEvents();
   }
 
   // ==========================================================================

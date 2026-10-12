@@ -22,6 +22,18 @@ import type {
 } from '../types';
 
 /**
+ * One terminal-to-host effect, in the order the native parser produced it
+ * (libghostty-vt only). `reply` chunks are the same ≤256-byte, UTF-8-safe
+ * strings `readResponse()` returns; a bell or title splits them at its position.
+ */
+export type NativeHostEvent =
+  | { readonly type: 'reply'; readonly data: string }
+  /** One BEL (0x07) executed by the parser; never an OSC/DCS terminator. */
+  | { readonly type: 'bell' }
+  /** OSC 0/2 set the title (also an unchanged or empty one); copied when it happened. */
+  | { readonly type: 'title'; readonly title: string };
+
+/**
  * One host pointer event for the native mouse encoder (libghostty-vt only).
  * The encoder decides from the terminal's current modes whether and how the
  * event is reported (tracking mode, format, motion dedup, out-of-view drops).
@@ -127,6 +139,13 @@ export interface TerminalBackend {
    * copy (empty for empty text); queued replies are untouched.
    */
   encodePaste?(data: Uint8Array): Uint8Array;
+  /** Start queueing bells and title changes (GHOSTTY_TERMINAL_OPT_BELL/TITLE_CHANGED). Idempotent. */
+  enableHostEvents?(): void;
+  /**
+   * Remove and return every pending reply and queued bell/title in native
+   * order. Replies already taken with `readResponse()` are not repeated.
+   */
+  takeHostEvents?(): NativeHostEvent[];
   /** Native focus report for the current mode-1004 state; returns owned bytes. */
   encodeFocus?(focused: boolean): Uint8Array;
 }

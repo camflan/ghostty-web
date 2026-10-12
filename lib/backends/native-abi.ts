@@ -294,6 +294,8 @@ function resolveLayout(r: Resolver) {
     resultNames: r.allEnums(R),
     terminalOption: r.enums('GhosttyTerminalOption', [
       'WRITE_PTY',
+      'BELL',
+      'TITLE_CHANGED',
       'SIZE',
       'COLOR_FOREGROUND',
       'COLOR_BACKGROUND',
@@ -316,6 +318,7 @@ function resolveLayout(r: Resolver) {
       'MODE',
       'COLOR_PALETTE_DEFAULT',
       'KITTY_KEYBOARD_FLAGS',
+      'TITLE',
     ] as const),
     screen: r.enums('GhosttyTerminalScreen', ['PRIMARY', 'ALTERNATE'] as const),
     terminalCursorStyle: r.enums('GhosttyTerminalCursorStyle', [

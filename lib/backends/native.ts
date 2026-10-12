@@ -28,7 +28,13 @@ import {
   type RenderStateCursor,
 } from '../types';
 import { type NativeAbi, type NativeLayout, bitsOf } from './native-abi';
-import type { KeyEncoderBackend, NativeMouseEvent, TerminalBackend, VtBackend } from './types';
+import type {
+  KeyEncoderBackend,
+  NativeHostEvent,
+  NativeMouseEvent,
+  TerminalBackend,
+  VtBackend,
+} from './types';
 
 /** Defaults the legacy engine rendered when no theme color was configured. */
 const LEGACY_DEFAULT_FOREGROUND = 0xcccccc;
@@ -88,12 +94,17 @@ interface ResolvedStyle {
 
 const NO_STYLE: ResolvedStyle = { fg: -1, bg: -1, flags: 0 };
 
+/** Shared (immutable) bell event, so a bell flood queues no per-bell objects. */
+const BELL_EVENT: NativeHostEvent = Object.freeze({ type: 'bell' });
+
 export class NativeBackend implements VtBackend {
   readonly kind = 'libghostty-vt' as const;
   private readonly terminals = new Map<number, NativeTerminal>();
   private writePtyIndex = 0;
   private sizeIndex = 0;
   private pasteReaderIndex = 0;
+  private bellIndex = 0;
+  private titleChangedIndex = 0;
   private callbackError: unknown = undefined;
   /** True while a vt_write or paste is running on any terminal of this instance. */
   writing = false;
@@ -187,6 +198,38 @@ export class NativeBackend implements VtBackend {
     return this.pasteReaderIndex;
   }
 
+  /**
+   * @internal Shared BELL / TITLE_CHANGED trampolines: `void (terminal, userdata)`.
+   * They only record the event (copying the title); host listeners run later,
+   * after parsing, never from inside the native callback.
+   */
+  bellCallback(): number {
+    this.bellIndex ||= this.eventCallback('bell', (terminal) => terminal.onBell());
+    return this.bellIndex;
+  }
+
+  /** @internal See `bellCallback`. */
+  titleChangedCallback(): number {
+    this.titleChangedIndex ||= this.eventCallback('title change', (terminal) =>
+      terminal.onTitleChanged()
+    );
+    return this.titleChangedIndex;
+  }
+
+  private eventCallback(what: string, effect: (terminal: NativeTerminal) => void): number {
+    return this.abi.addFunction(2, false, (handle) => {
+      // Never throw into WASM mid-parse: record and rethrow after vt_write.
+      try {
+        const terminal = this.terminals.get(handle);
+        if (!terminal) throw new Error(`libghostty-vt: ${what} for unknown terminal ${handle}`);
+        effect(terminal);
+      } catch (error) {
+        this.callbackError ??= error;
+      }
+      return undefined;
+    });
+  }
+
   /** @internal Rethrow the first error recorded by a callback during the last write. */
   rethrowCallbackError(): void {
     if (this.callbackError !== undefined) {
@@ -217,6 +260,7 @@ class Scratch {
   readonly paste: number;
   readonly pasteMime: number;
   readonly pasteMimeText: number;
+  readonly title: number;
 
   constructor(abi: NativeAbi) {
     const L = abi.layout;
@@ -243,6 +287,7 @@ class Scratch {
       paste: take(L.paste.size),
       pasteMime: take(L.string.size),
       pasteMimeText: take(TEXT_PLAIN.length),
+      title: take(L.string.size),
     };
     this.size = offset;
     this.base = abi.alloc(offset);
@@ -262,6 +307,7 @@ class Scratch {
     this.paste = this.base + rel.paste;
     this.pasteMime = this.base + rel.pasteMime;
     this.pasteMimeText = this.base + rel.pasteMimeText;
+    this.title = this.base + rel.title;
   }
 }
 
@@ -405,6 +451,13 @@ export class NativeTerminal implements TerminalBackend {
   /** During `encodePaste` only: the text being read and the paste's own WRITE_PTY output. */
   private pasteText: Uint8Array | null = null;
   private pasteOutput: Uint8Array[] | null = null;
+  /** Reply bytes ever queued / taken: the position a bell or title is ordered by. */
+  private replyBytesQueued = 0;
+  private replyBytesTaken = 0;
+  /** Bells/titles since `enableHostEvents()`, each after `hostEventAt[i]` reply bytes. */
+  private hostEventsEnabled = false;
+  private hostEvents: NativeHostEvent[] = [];
+  private hostEventAt: number[] = [];
   private readonly decoder = new TextDecoder();
 
   constructor(
@@ -612,6 +665,8 @@ export class NativeTerminal implements TerminalBackend {
     this.rowCells = this.rowIterator = this.renderState = this.handle = 0;
     this.scratch = null;
     this.replies = [];
+    this.hostEvents = [];
+    this.hostEventAt = [];
   }
 
   // ==========================================================================
@@ -1088,7 +1143,13 @@ export class NativeTerminal implements TerminalBackend {
    * the queued protocol replies.
    */
   onWritePty(ptr: number, len: number): void {
-    if (len > 0) (this.pasteOutput ?? this.replies).push(this.abi.bytes().slice(ptr, ptr + len));
+    if (len <= 0) return;
+    const bytes = this.abi.bytes().slice(ptr, ptr + len);
+    if (this.pasteOutput) this.pasteOutput.push(bytes);
+    else {
+      this.replies.push(bytes);
+      this.replyBytesQueued += len;
+    }
   }
 
   hasResponse(): boolean {
@@ -1101,6 +1162,15 @@ export class NativeTerminal implements TerminalBackend {
    */
   readResponse(): string | null {
     if (this.replies.length === 0) return null;
+    return this.takeReplyChunk(this.replyBytesQueued - this.replyBytesTaken);
+  }
+
+  /**
+   * Remove and decode the next reply chunk from the first `limit` pending
+   * bytes: at most RESPONSE_CHUNK bytes, cut before a UTF-8 sequence the
+   * chunk size would split. `limit` itself is always a WRITE_PTY boundary.
+   */
+  private takeReplyChunk(limit: number): string {
     let pending: Uint8Array;
     if (this.replies.length === 1) pending = this.replies[0];
     else {
@@ -1111,8 +1181,8 @@ export class NativeTerminal implements TerminalBackend {
         at += r.length;
       }
     }
-    let end = Math.min(RESPONSE_CHUNK, pending.length);
-    if (end < pending.length) {
+    let end = Math.min(RESPONSE_CHUNK, limit);
+    if (end < limit) {
       // Cut before the lead byte of a sequence the chunk boundary would split
       // (continuation bytes are 10xxxxxx; valid UTF-8 has at most 3 of them).
       let cut = end;
@@ -1120,7 +1190,72 @@ export class NativeTerminal implements TerminalBackend {
       if (cut > 0 && (pending[cut] & 0xc0) !== 0x80) end = cut;
     }
     this.replies = end < pending.length ? [pending.slice(end)] : [];
+    this.replyBytesTaken += end;
     return this.decoder.decode(pending.subarray(0, end));
+  }
+
+  // ==========================================================================
+  // Host events (BELL / TITLE_CHANGED effects)
+  // ==========================================================================
+
+  /**
+   * Install the BELL and TITLE_CHANGED callbacks; from now on every bell and
+   * title change is queued, ordered against the replies, for `takeHostEvents`.
+   */
+  enableHostEvents(): void {
+    if (this.hostEventsEnabled) return;
+    this.set('BELL', this.backend.bellCallback());
+    this.set('TITLE_CHANGED', this.backend.titleChangedCallback());
+    this.hostEventsEnabled = true;
+  }
+
+  /**
+   * Remove and return all pending replies and queued events in native order.
+   * Replies before an event (not yet taken by `readResponse()`) come first,
+   * in `readResponse()`-sized chunks; trailing replies come last.
+   */
+  takeHostEvents(): NativeHostEvent[] {
+    const out: NativeHostEvent[] = [];
+    const events = this.hostEvents;
+    const at = this.hostEventAt;
+    this.hostEvents = [];
+    this.hostEventAt = [];
+    for (let i = 0; i < events.length; i++) {
+      while (this.replyBytesTaken < at[i]) {
+        out.push({ type: 'reply', data: this.takeReplyChunk(at[i] - this.replyBytesTaken) });
+      }
+      out.push(events[i]);
+    }
+    while (this.replies.length > 0) {
+      const data = this.takeReplyChunk(this.replyBytesQueued - this.replyBytesTaken);
+      out.push({ type: 'reply', data });
+    }
+    return out;
+  }
+
+  /** @internal BELL effect. */
+  onBell(): void {
+    if (!this.hostEventsEnabled) return;
+    this.hostEvents.push(BELL_EVENT);
+    this.hostEventAt.push(this.replyBytesQueued);
+  }
+
+  /**
+   * @internal TITLE_CHANGED effect. Upstream sets the title before calling,
+   * so it is read here; the borrowed string is copied (decoded) immediately.
+   */
+  onTitleChanged(): void {
+    if (!this.hostEventsEnabled) return;
+    const at = this.scratch!.title;
+    const S = this.L.string;
+    this.abi.bytes().fill(0, at, at + S.size);
+    this.getData('TITLE', at);
+    const view = this.abi.view();
+    const ptr = view.getUint32(at + S.ptr, true);
+    const len = view.getUint32(at + S.len, true);
+    const title = len > 0 ? this.abi.readString(ptr, len) : '';
+    this.hostEvents.push({ type: 'title', title });
+    this.hostEventAt.push(this.replyBytesQueued);
   }
 
   // ==========================================================================

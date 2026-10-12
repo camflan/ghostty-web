@@ -178,6 +178,17 @@ describe('libghostty-vt detection', () => {
     );
   });
 
+  test('bell/title manifest entries are required', () => {
+    const instance = patchedManifest((manifest) => {
+      manifest.types.GhosttyTerminalOption.values.BELL = undefined;
+      manifest.types.GhosttyTerminalOption.values.TITLE_CHANGED = undefined;
+      manifest.types.GhosttyTerminalData.values.TITLE = undefined;
+    });
+    expect(() => new Ghostty(instance)).toThrow(
+      'missing GhosttyTerminalOption.BELL; missing GhosttyTerminalOption.TITLE_CHANGED; missing GhosttyTerminalData.TITLE'
+    );
+  });
+
   test('mouse input exports and manifest entries are required', () => {
     for (const name of [
       'ghostty_mouse_encoder_setopt',
@@ -1119,5 +1130,164 @@ describe('libghostty-vt paste', () => {
       t.free();
     }
     expect(() => t.encodePaste('x')).toThrow('GhosttyTerminal has been freed');
+  });
+});
+
+describe('libghostty-vt bell and title events', () => {
+  type Ev = ReturnType<GhosttyTerminal['takeHostEvents']>[number];
+  const reply = (data: string): Ev => ({ type: 'reply', data });
+  const bell: Ev = { type: 'bell' };
+  const title = (t: string): Ev => ({ type: 'title', title: t });
+  /** A terminal with host events enabled; `run` writes and takes everything queued. */
+  function events<T>(body: (run: (data: string | Uint8Array) => Ev[], t: GhosttyTerminal) => T) {
+    return withTerm(20, 3, (t) => {
+      t.enableHostEvents();
+      return body((data) => {
+        t.write(data);
+        return t.takeHostEvents();
+      }, t);
+    });
+  }
+
+  test('nothing is queued until enabled; replies stay on readResponse', () => {
+    withTerm(20, 3, (t) => {
+      t.write('\x07\x1b]2;before\x07\x1b[5n');
+      expect(t.hasResponse()).toBe(true);
+      expect(t.takeHostEvents()).toEqual([reply('\x1b[0n')]);
+      t.enableHostEvents();
+      t.enableHostEvents(); // idempotent: still one event per effect
+      t.write('\x07\x1b]2;after\x07');
+      expect(t.takeHostEvents()).toEqual([bell, title('after')]);
+      expect(t.takeHostEvents()).toEqual([]);
+    });
+  });
+
+  test('every executed BEL is a bell; OSC/DCS terminators are not', () => {
+    events((run) => {
+      expect(run('\x07')).toEqual([bell]);
+      expect(run('a\x07b\x07\x07')).toEqual([bell, bell, bell]);
+      expect(run('\x1b]0;hello\x07')).toEqual([title('hello')]);
+      expect(run('\x1b]8;;https://a.example\x07link\x1b]8;;\x07')).toEqual([]);
+      expect(run('\x1b]1;icon only\x07')).toEqual([]);
+      expect(run('\x1bPq#0\x07\x1b\\')).toEqual([]);
+      expect(run('\x1b[1\x07m')).toEqual([bell]); // C0 executes inside CSI
+      expect(run(new Uint8Array([0x07, 0x1b, 0x5d, 0x32, 0x3b, 0x07]))).toEqual([bell, title('')]);
+    });
+  });
+
+  test('titles: OSC 0/2, BEL/ST, bytes, Unicode, each change in order (no dedup here)', () => {
+    events((run) => {
+      expect(run('\x1b]2;hello\x07')).toEqual([title('hello')]);
+      expect(run('\x1b]0;with st\x1b\\')).toEqual([title('with st')]);
+      expect(run(new TextEncoder().encode('\x1b]2;bytes\x07'))).toEqual([title('bytes')]);
+      expect(run('\x1b]2;a\x07\x1b]2;a\x07\x1b]2;b\x07\x1b]2;\x07')).toEqual([
+        title('a'),
+        title('a'),
+        title('b'),
+        title(''),
+      ]);
+      expect(run('\x1b]2;héllo 世界 🎉\x07')).toEqual([title('héllo 世界 🎉')]);
+      expect(run('\x1b]2;cancelled\x18')).toEqual([]);
+      // Upstream caps a title at 1024 bytes.
+      expect(run(`\x1b]2;${'é'.repeat(600)}\x07`)).toEqual([title('é'.repeat(512))]);
+    });
+  });
+
+  test('fragmented sequences are reported once complete, across writes and UTF-8 splits', () => {
+    events((run) => {
+      expect(run('\x1b]2;sp')).toEqual([]);
+      // The parser ends the OSC at the ESC of ST (string state exit).
+      expect(run('lit\x1b')).toEqual([title('split')]);
+      expect(run('\\')).toEqual([]);
+      const bytes = new TextEncoder().encode('\x1b]2;€uro\x07\x07');
+      const seen: Ev[] = [];
+      for (const b of bytes) seen.push(...run(new Uint8Array([b])));
+      expect(seen).toEqual([title('€uro'), bell]);
+    });
+  });
+
+  test('replies, bells and titles keep parser order; reply chunks split only at events', () => {
+    events((run, t) => {
+      expect(run('\x1b[5n\x07\x1b]2;a\x07\x1b[6n\x1b[5n\x07')).toEqual([
+        reply('\x1b[0n'),
+        bell,
+        title('a'),
+        reply('\x1b[1;1R\x1b[0n'),
+        bell,
+      ]);
+      // 320 reply bytes before a bell: readResponse()-sized chunks, then the bell.
+      expect(run(`${'\x1b[5n'.repeat(80)}\x07\x1b[5n`)).toEqual([
+        reply('\x1b[0n'.repeat(64)),
+        reply('\x1b[0n'.repeat(16)),
+        bell,
+        reply('\x1b[0n'),
+      ]);
+      // Replies already read are not repeated; events still come out in order.
+      t.write('\x1b[5n\x07\x1b[6n\x1b]2;b\x07');
+      expect(t.readResponse()).toBe('\x1b[0n\x1b[1;1R');
+      expect(t.takeHostEvents()).toEqual([bell, title('b')]);
+      expect(t.hasResponse()).toBe(false);
+    });
+  });
+
+  test('RIS clears the title without an event; the next title is reported', () => {
+    events((run) => {
+      expect(run('\x1b]2;x\x07\x1bc')).toEqual([title('x')]);
+      expect(run('\x1b]2;x\x07')).toEqual([title('x')]);
+    });
+  });
+
+  test('two terminals on one instance: isolated queues, one table slot per callback kind', () => {
+    const g = fresh();
+    const table = (g as unknown as { exports: { __indirect_function_table: WebAssembly.Table } })
+      .exports.__indirect_function_table;
+    const a = g.createTerminal(10, 2);
+    const b = g.createTerminal(10, 2);
+    try {
+      a.enableHostEvents();
+      const slots = table.length;
+      b.enableHostEvents();
+      expect(table.length).toBe(slots);
+      a.write('\x1b]2;A\x07');
+      b.write('\x07\x1b]2;B\x07');
+      a.write('\x07');
+      expect(a.takeHostEvents()).toEqual([title('A'), bell]);
+      expect(b.takeHostEvents()).toEqual([bell, title('B')]);
+      const c = g.createTerminal(10, 2);
+      c.enableHostEvents();
+      c.write('\x07');
+      expect(c.takeHostEvents()).toEqual([bell]);
+      c.free();
+      expect(table.length).toBe(slots);
+    } finally {
+      a.free();
+      b.free();
+    }
+    expect(() => a.takeHostEvents()).toThrow('GhosttyTerminal has been freed');
+    expect(() => a.enableHostEvents()).toThrow('GhosttyTerminal has been freed');
+  });
+
+  test('a failing title read is rethrown after parsing; the terminal stays usable', () => {
+    let failTitle = false;
+    const instance = patchedExports((ex) => {
+      const get = ex.ghostty_terminal_get as (t: number, d: number, o: number) => number;
+      const TITLE = readManifest(ex).types.GhosttyTerminalData.values.TITLE;
+      const INVALID = readManifest(ex).types.GhosttyResult.values.INVALID_VALUE;
+      ex.ghostty_terminal_get = (t: number, d: number, o: number) =>
+        failTitle && d === TITLE ? INVALID : get(t, d, o);
+    });
+    const t = new Ghostty(instance).createTerminal(10, 2);
+    try {
+      t.enableHostEvents();
+      failTitle = true;
+      expect(() => t.write('\x07\x1b]2;x\x07after')).toThrow('terminal_get TITLE failed');
+      expect(text(t, 0)).toBe('after'); // parsing completed
+      failTitle = false;
+      expect(t.takeHostEvents()).toEqual([bell]);
+      t.write('\x1b]2;ok\x07');
+      expect(t.takeHostEvents()).toEqual([title('ok')]);
+    } finally {
+      t.free();
+    }
   });
 });
