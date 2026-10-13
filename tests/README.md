@@ -19,22 +19,23 @@ bug reproducers**. Existing bugs and future-parity requirements are in a separat
 explicitly selected [gap suite](gaps/README.md). A gap failure is a real failure,
 not a passing test.
 
-Validated on 2026-10-12, including the native keyboard, mouse, paste/focus routing
-slices and OSC 8 activation safety after migration checkpoint `ffe8b66`:
+Validated on 2026-10-13, including native events, selection anchoring, canvas fixes,
+binary mouse input and synchronized-output presentation after the earlier input
+and migration checkpoints:
 
 | Lane                                             | Native (`web-candidate`) | Legacy (`web-pinned`) |
 | ------------------------------------------------ | ------------------------ | --------------------- |
-| Required core behavior                           | 255 passed               | 216 passed            |
+| Required core behavior                           | 265 passed               | 218 passed            |
 | Core controls and harness checks                 | 58 passed                | 58 passed             |
-| Required browser behavior                        | 90 passed                | 74 passed             |
+| Required browser behavior                        | 102 passed               | 76 passed             |
 | Browser controls                                 | 6 passed                 | 6 passed              |
-| Opt-in core gaps                                 | 13 failed, exit 1        | 54 failed, exit 1     |
-| Opt-in browser gaps                              | 15 failed, exit 1        | 31 failed, exit 1     |
+| Opt-in core gaps                                 | 3 failed, exit 1         | 52 failed, exit 1     |
+| Opt-in browser gaps                              | 7 failed, exit 1         | 33 failed, exit 1     |
 | Unsupported core ABI cases (metadata, not tests) | 3                        | 1                     |
 
-The full default `bun test` run passes **916 tests**, including the native core
+The full default `bun test` run passes **1,037 tests**, including the native core
 lane above, existing public-library tests and harness/policy checks. Browser runs
-use the canonical container: **96 native / 80 legacy passes**, zero skips, retries
+use the canonical container: **108 native / 82 legacy passes**, zero skips, retries
 or flaky results. All eight reviewed scene images remain unchanged. Core matrix
 reports list gaps and unsupported ABI scope separately from executed pass/fail
 counts; no required cases are missing.
@@ -54,9 +55,19 @@ on native. Application-drag selection suppression passes on both engines; the ne
 Shift-local selection case reproduces a legacy-only gap. The paste/focus slices add
 26 bridge/host unit tests and two browser cases, promoting six core and two browser
 gaps unchanged on native. The OSC 8 safety fix adds 49 provider tests and promotes
-its browser gap on both engines. The current catalogues contain 271 core and 111
-browser declarations (105 browser behavior cases plus 6 controls). No existing
+its browser gap on both engines. The current catalogues contain 271 core and 115
+browser declarations (109 browser behavior cases plus 6 controls). No existing
 required case was demoted.
+
+The subsequent event/buffer, native-selection, canvas, binary-input and synchronized-
+output checkpoints promote ten more original core cases on native (two on legacy
+as well) and eight original browser cases on native (two on legacy as well).
+Four new browser cases cover parser events, binary bytes and render-hold boundaries.
+The original wire-byte mouse oracle now observes the additive binary channel;
+its expected bytes are unchanged. A native-selection rejection check was moved to
+the existing artifact-selected facade scenario so native-only CI does not acquire
+a legacy-WASM prerequisite. A timed selection-edge race discovered by a required
+browser run has a reproducing unit test and a production fix, not a failure waiver.
 
 See [the migration notes](../docs/migration-libghostty-vt.md) for independent
 reference/package validation, improvements and the approved native scrollback

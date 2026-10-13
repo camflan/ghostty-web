@@ -75,6 +75,30 @@ test('the renderer paints the held frame while buffer, replies and events stay l
   });
 });
 
+test('a held frame keeps its scrollbar history length while the public history remains live', async () => {
+  await session(({ term, paint }) => {
+    term.write('a\r\nb\r\nc\r\nd\r\ne');
+    paint();
+    const capturedHistory = term.getScrollbackLength();
+    term.write('\x1b[?2026h' + '\r\nmore'.repeat(20));
+    expect(term.getScrollbackLength()).toBeGreaterThan(capturedHistory);
+    const lengths: number[] = [];
+    const renderer = term.renderer as unknown as {
+      renderScrollbar(viewportY: number, history: number, rows: number, opacity: number): void;
+    };
+    const original = renderer.renderScrollbar.bind(renderer);
+    renderer.renderScrollbar = (viewport, history, rows, opacity) => {
+      lengths.push(history);
+      original(viewport, history, rows, opacity);
+    };
+    term.renderer!.render(term.wasmTerm!, true, 0, term, 1);
+    expect(lengths).toEqual([capturedHistory]);
+    term.write('\x1b[?2026l');
+    term.renderer!.render(term.wasmTerm!, true, 0, term, 1);
+    expect(lengths.at(-1)).toBe(term.getScrollbackLength());
+  });
+});
+
 test('history and selection views show the live screen, never a mix', async () => {
   await session(({ term, paint }) => {
     term.write('h1\r\nh2\r\nh3\r\nh4\r\nh5');
@@ -114,29 +138,32 @@ test('a hold times out at draw time; re-enabling 2026 does not extend it', async
 test('resize and reset() end a hold; dispose during a hold leaves no timers', async () => {
   const timers: string[] = [];
   const { setTimeout: st, setInterval: si } = globalThis;
-  await session(({ term, paint }) => {
-    term.write('a\x1b[?2026hb');
-    expect(paint(true).get(0)).toBe('a');
-    term.resize(14, 3);
-    expect(paint(true).get(0)).toBe('ab');
-    term.write('\x1b[?2026hc');
-    term.reset();
-    expect(term.wasmTerm!.getMode(2026)).toBe(false);
-    expect(paint(true).get(0)).toBe('');
-    term.write('x\x1b[?2026hy');
-    globalThis.setTimeout = ((...args: Parameters<typeof st>) => {
-      timers.push('timeout');
-      return st(...args);
-    }) as typeof st;
-    globalThis.setInterval = ((...args: Parameters<typeof si>) => {
-      timers.push('interval');
-      return si(...args);
-    }) as typeof si;
-    paint();
-    term.write('z');
-    paint();
-  });
-  globalThis.setTimeout = st;
-  globalThis.setInterval = si;
+  try {
+    await session(({ term, paint }) => {
+      term.write('a\x1b[?2026hb');
+      expect(paint(true).get(0)).toBe('a');
+      term.resize(14, 3);
+      expect(paint(true).get(0)).toBe('ab');
+      term.write('\x1b[?2026hc');
+      term.reset();
+      expect(term.wasmTerm!.getMode(2026)).toBe(false);
+      expect(paint(true).get(0)).toBe('');
+      term.write('x\x1b[?2026hy');
+      globalThis.setTimeout = ((...args: Parameters<typeof st>) => {
+        timers.push('timeout');
+        return st(...args);
+      }) as typeof st;
+      globalThis.setInterval = ((...args: Parameters<typeof si>) => {
+        timers.push('interval');
+        return si(...args);
+      }) as typeof si;
+      paint();
+      term.write('z');
+      paint();
+    });
+  } finally {
+    globalThis.setTimeout = st;
+    globalThis.setInterval = si;
+  }
   expect(timers).toEqual([]);
 });

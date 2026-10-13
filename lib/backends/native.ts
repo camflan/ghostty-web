@@ -104,6 +104,7 @@ interface HeldFrame {
   readonly id: number;
   readonly cols: number;
   readonly rows: number;
+  readonly scrollbackLength: number;
   /** Live `cleanSeq` at capture: the dirty flags below are relative to that paint. */
   readonly cleanSeq: number;
   dirty: DirtyState;
@@ -1485,6 +1486,7 @@ export class NativeTerminal implements TerminalBackend {
       id,
       cols,
       rows,
+      scrollbackLength: this.getScrollbackLength(),
       cleanSeq: this.cleanSeq,
       dirty: this.dirty,
       rowDirty: this.rowDirty.slice(),
@@ -1522,6 +1524,7 @@ export class NativeTerminal implements TerminalBackend {
     return {
       backend: 'libghostty-vt',
       getDimensions: () => ({ cols: frame.cols, rows: frame.rows }),
+      getScrollbackLength: () => frame.scrollbackLength,
       getLine: (y) => {
         if (!Number.isInteger(y) || y < 0 || y >= frame.rows) return null;
         const line: GhosttyCell[] = new Array(frame.cols);

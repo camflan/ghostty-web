@@ -646,10 +646,10 @@
     },
     {
       "id": "sync.hold-keeps-last-complete-frame",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "RT-09 [js-layer]: Mode 2026 is tracked by the terminal but the renderer ignores it and paints partial frames immediately. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "reason": "Legacy-only gap; native RENDER_HOLD captures the complete frame at the parser boundary and passes the unchanged image assertion."
     },
     {
       "id": "sync.release-paints-new-frame",
@@ -709,6 +709,20 @@
       "gaps": ["web-pinned"],
       "unsupported": [],
       "reason": "Legacy mouse encoding still emits high-bit UTF-16 code units on the text channel; native emits lossless raw byte strings on additive onBinary."
+    },
+    {
+      "id": "sync.captures-prefix-and-back-to-back-holds",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy exposes mode 2026 state but has neither native frame-capture callbacks nor bounded presentation holds."
+    },
+    {
+      "id": "sync.timeout-releases-presentation",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy exposes mode 2026 state but has neither native frame-capture callbacks nor bounded presentation holds."
     }
   ]
 }

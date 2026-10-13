@@ -201,6 +201,8 @@ export interface TerminalBackend {
 export interface HeldFrameView {
   readonly backend: 'libghostty-vt';
   getDimensions(): { cols: number; rows: number };
+  /** Captured history length for the scrollbar, never live rows during a hold. */
+  getScrollbackLength(): number;
   /** Copies of one captured row, or null if out of range. */
   getLine(y: number): GhosttyCell[] | null;
   getCursor(): RenderStateCursor;

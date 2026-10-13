@@ -45,6 +45,8 @@ export interface IRenderable {
    * (those views show the live screen while the hold continues).
    */
   getPresentation?(): IRenderable;
+  /** Optional captured history length on a presentation view. */
+  getScrollbackLength?(): number;
 }
 
 export interface IScrollbackProvider {
@@ -301,8 +303,11 @@ export class CanvasRenderer {
   ): void {
     // Synchronized output: draw the held frame (every read below, including
     // graphemes, cursor and dirty tracking, then comes from it).
+    let heldHistory: number | undefined;
     if (buffer.getPresentation && viewportY === 0 && !this.selectionManager?.hasSelection()) {
-      buffer = buffer.getPresentation();
+      const presentation = buffer.getPresentation();
+      if (presentation !== buffer) heldHistory = presentation.getScrollbackLength?.();
+      buffer = presentation;
     }
 
     // Store buffer reference for grapheme lookups in renderCell
@@ -312,7 +317,8 @@ export class CanvasRenderer {
     // Multiple update() calls are safe - dirty state persists until clearDirty().
     const cursor = buffer.getCursor();
     const dims = buffer.getDimensions();
-    const scrollbackLength = scrollbackProvider ? scrollbackProvider.getScrollbackLength() : 0;
+    const scrollbackLength =
+      heldHistory ?? (scrollbackProvider ? scrollbackProvider.getScrollbackLength() : 0);
 
     // Check if buffer needs full redraw (e.g., screen change between normal/alternate)
     if (buffer.needsFullRedraw?.()) {

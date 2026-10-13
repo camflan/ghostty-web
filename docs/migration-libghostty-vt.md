@@ -95,21 +95,23 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including native keyboard, mouse, paste/focus routing and
-OSC 8 activation safety, was validated on **2026-10-12**:
+The required baseline, including native events, selection anchoring, canvas fixes,
+binary mouse input and synchronized-output presentation, was validated on
+**2026-10-13**:
 
-- **916 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **313 native / 274 legacy passes** (255 / 216 behavior cases plus
+- **1,037 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core: **323 native / 276 legacy passes** (265 / 218 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **96 native / 80 legacy passes**, zero skips, retries or flaky
+- Required browser: **108 native / 82 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
-- Opt-in core gaps: **13 native / 54 legacy failures**. Opt-in browser gaps:
-  **15 native / 31 legacy failures**. Every gap run exited **1**; these are open
+- Opt-in core gaps: **3 native / 52 legacy failures**. Opt-in browser gaps:
+  **7 native / 33 legacy failures**. Every gap run exited **1**; these are open
   defects/parity requirements, not passing regression coverage. Counts across
   lanes overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
   package consumer passed **6 checks**. Formatting, lint, both TypeScript projects,
-  workflow lint, shellcheck and the full native shipping build passed.
+  and the full native shipping build passed. Workflow lint and shellcheck passed
+  at the earlier migration checkpoint; their files are unchanged here.
 
 The earlier totals of 804 Bun tests, 307 core tests per engine and 105 browser
 tests included accepted failures or applicability-only checks. They are **not**
@@ -430,6 +432,37 @@ release, wheel, an extra-button press/ASCII release pair, SGR press/release, and
 ordinary Unicode keyboard input. No browser error or WASM trap was recorded;
 services were stopped after the run. Other operating-system PTYs remain manual
 validation gates, not claims made by the Linux smoke.
+
+## Native synchronized-output presentation
+
+The native RENDER_HOLD callback captures the completed frame at the exact parser
+boundary when mode 2026 starts, before later bytes in the same write are processed.
+This also preserves a completed frame between a release and a new hold without an
+intervening browser paint. Cells, styles, graphemes, cursor and history length belong
+to that captured presentation; changed rows are copied before live decoding can
+overwrite them. The canvas keeps normal dirty tracking rather than forcing every
+frame to redraw. Scrollbar geometry uses the captured history length too.
+
+Only presentation is held. Public buffer/selection APIs, replies and native events
+remain live. At the viewport bottom with no selection, the renderer uses the held
+view; scrolling into history or displaying a selection uses the live view without
+mixing it with held rows. Returning to an unselected bottom view can show the held
+frame again until the application releases it or the timeout expires. This is an
+explicit presentation policy, not a hidden parser pause.
+
+Mode reset, RIS, native resize and cell-metric changes release the hold. A hold is
+limited to one second at draw time, using the upstream mode setter and a monotonic
+clock; duplicate enables do not extend the deadline. There are no hold timers to
+leak on disposal. If nothing draws, timeout cleanup occurs at the next presentation
+request, matching upstream's draw-time example. DECCOLM/host-grid reconciliation
+is guarded so a temporary native size mismatch cannot poison the renderer.
+
+The original held-frame image assertion passes unchanged on native. Bridge and
+host tests cover exact capture, live reads, Unicode/styles/hyperlinks, chunked
+writes, repeated holds, dirty tracking, timeout, resize/reset and independent
+terminal lifetimes. New browser cases check same-write prefix capture and
+back-to-back holds against independent rendered frames, plus timeout release.
+Legacy still lacks this presentation bridge, so its explicit sync gaps remain.
 
 ## Remaining API and policy decisions
 

@@ -80,6 +80,19 @@ retention guarantee. `scrollback: 0` disables history. Buffer APIs report the ro
 actually retained. Exact xterm-style retention is deferred rather than emulated
 with a hidden JavaScript clamp.
 
+## Selection and synchronized output
+
+Native selection text comes from Ghostty's formatter, with complete graphemes,
+joined soft wraps and no wide-character spacer artifacts. Native anchors follow
+output and reflow; history pruning follows Ghostty's endpoint-clamping behavior.
+`selectAll()` includes history. Existing public selection-coordinate conventions
+are retained; see the [migration notes](./docs/migration-libghostty-vt.md).
+
+Mode 2026 holds presentation at the frame captured by Ghostty's render-hold
+callback, while buffer reads and protocol replies remain live. The hold ends on
+release/reset/resize or after a one-second draw-time timeout. History navigation
+and active selection show live content instead of mixing live and held rows.
+
 ## Native paste and focus input
 
 The native backend delegates paste sanitization and mode-2004 framing to Ghostty.
