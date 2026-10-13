@@ -525,6 +525,8 @@ export class NativeTerminal implements TerminalBackend {
   private readonly linkIds = new Map<string, number>();
   /** Ids are never reused, so an evicted URI's old id never names another URI. */
   private nextLinkId = 0;
+  /** A replaced viewport pool cannot protect lower-row ids until fully decoded. */
+  private deferLinkPruning = false;
 
   // ---- replies queued by WRITE_PTY, in order ----
   private replies: Uint8Array[] = [];
@@ -1780,6 +1782,10 @@ export class NativeTerminal implements TerminalBackend {
   private allocatePool(): void {
     const total = this.cols * this.rows;
     if (this.pool.length !== total) {
+      // Keep the old URI->id mapping through the next complete decode. Pruning
+      // against a partially rebuilt blank pool could evict links still visible
+      // after resize. Capacity is enforced once all current cells protect ids.
+      if (this.pool.length > 0) this.deferLinkPruning = true;
       this.pool = Array.from({ length: total }, blankCell);
     }
     this.rowDirty = new Uint8Array(this.rows);
@@ -1871,6 +1877,10 @@ export class NativeTerminal implements TerminalBackend {
       throw new Error(`libghostty-vt: render state has ${y} rows, terminal has ${this.rows}`);
     }
     this.refreshSpacerHeads(all);
+    if (this.deferLinkPruning) {
+      this.deferLinkPruning = false;
+      if (this.linkIds.size > 3 * this.cols * this.rows + LINK_ID_SLACK) this.pruneLinkIds();
+    }
     this.decodeAll = false;
     this.stale = false;
   }
@@ -2243,7 +2253,12 @@ export class NativeTerminal implements TerminalBackend {
     if (!uri) return 0;
     let id = this.linkIds.get(uri);
     if (id === undefined) {
-      if (this.linkIds.size >= 3 * this.cols * this.rows + LINK_ID_SLACK) this.pruneLinkIds();
+      if (
+        !this.deferLinkPruning &&
+        this.linkIds.size >= 3 * this.cols * this.rows + LINK_ID_SLACK
+      ) {
+        this.pruneLinkIds();
+      }
       id = ++this.nextLinkId;
     } else this.linkIds.delete(uri); // re-inserted below as most recently used
     this.linkIds.set(uri, id);

@@ -95,13 +95,13 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including the multi-lane integration review fixes, was
+The required baseline, including both integration review rounds, was
 validated on **2026-10-13**:
 
-- **1,100 native-default Bun tests passed**, with no accepted-failure outcomes.
+- **1,109 native-default Bun tests passed**, with no accepted-failure outcomes.
 - Required core: **325 native / 278 legacy passes** (267 / 220 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **120 native / 90 legacy passes**, zero skips, retries or flaky
+- Required browser: **122 native / 92 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
 - Opt-in core gaps: **1 native / 50 legacy failures**. Opt-in browser gaps:
   **1 native / 31 legacy failures**. Every gap run exited **1**; these are open
@@ -525,7 +525,8 @@ inside one cell.
 
 ## Integration review follow-up
 
-The four-lane review and resulting fixes are recorded in
+The initial four-lane review, a fresh completed four-reviewer follow-up, and their
+resulting fixes are recorded in
 [the integration review report](./integration-review.md), including bounded hyperlink
 identity storage, a pinned-upstream spacer-cache workaround, allocation/hold error
 cleanup, key ownership and modifier reporting, read-only wheel input, resize ordering,

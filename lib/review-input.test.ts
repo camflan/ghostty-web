@@ -171,6 +171,50 @@ test('review: cancelling wheel animation settles at its whole-row target', async
   }
 });
 
+test('review round 2: sub-frame and invalid scroll durations settle without runaway animation', async () => {
+  await session(({ term, canvas }) => {
+    for (let i = 0; i < 30; i++) term.write(`line ${i}\r\n`);
+    const control = term as unknown as { animateScroll(): void; scrollAnimationFrame?: number };
+    const rows: number[] = [];
+    term.onScroll((row) => rows.push(row));
+    for (const duration of [0, 1, 10, 16, 1000 / 60, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      term.scrollToBottom();
+      term.options.smoothScrollDuration = duration;
+      wheel(canvas, -3 * term.renderer!.getMetrics().height);
+      control.animateScroll();
+      expect(term.getViewportY()).toBe(3);
+      expect(control.scrollAnimationFrame).toBeUndefined();
+    }
+    expect(
+      rows.every((row) => Number.isInteger(row) && row >= 0 && row <= term.getScrollbackLength())
+    ).toBe(true);
+  });
+});
+
+test('review round 2: explicit navigation wins even when its target equals the pre-cancel position', async () => {
+  for (const action of ['bottom', 'line', 'relative', 'top'] as const) {
+    await session(({ term }) => {
+      for (let i = 0; i < 30; i++) term.write(`line ${i}\r\n`);
+      const limit = term.getScrollbackLength();
+      const control = term as unknown as {
+        targetViewportY: number;
+        scrollAnimationFrame?: number;
+        scrollAnimationStartTime?: number;
+      };
+      term.viewportY = action === 'top' ? limit : 0;
+      control.targetViewportY = action === 'top' ? limit - 3 : 3;
+      control.scrollAnimationStartTime = Date.now();
+      control.scrollAnimationFrame = requestAnimationFrame(() => {});
+      if (action === 'bottom') term.scrollToBottom();
+      if (action === 'line') term.scrollToLine(0);
+      if (action === 'relative') term.scrollLines(3); // pending target 3 minus 3 = 0
+      if (action === 'top') term.scrollToTop();
+      expect(term.getViewportY()).toBe(action === 'top' ? limit : 0);
+      expect(control.scrollAnimationFrame).toBeUndefined();
+    });
+  }
+});
+
 test('review: resize notifies the host before in-band size reports, including nested writes', async () => {
   await session(({ term, data }) => {
     term.write('\x1b[?2048h');
@@ -211,6 +255,76 @@ test('review: resize listeners may dispose or resize again without dispatching s
     term.onResize(() => term.dispose());
     expect(() => term.resize(50, 12)).not.toThrow();
     expect(data).toEqual([]);
+  });
+});
+
+test('review round 2: later resize listeners never finish with superseded dimensions', async () => {
+  await session(({ term }) => {
+    term.write('\x1b[?2048h');
+    const hostSizes: number[][] = [];
+    term.onResize(({ cols }) => {
+      if (cols === 50) term.resize(60, 14);
+    });
+    term.onResize(({ cols, rows }) => hostSizes.push([cols, rows]));
+    term.resize(50, 12);
+    expect(hostSizes).toEqual([[60, 14]]);
+    expect([term.cols, term.rows]).toEqual(hostSizes.at(-1)!);
+  });
+  await session(({ term }) => {
+    let staleCalls = 0;
+    term.onResize(() => term.dispose());
+    term.onResize(() => staleCalls++);
+    term.resize(50, 12);
+    expect(staleCalls).toBe(0);
+  });
+});
+
+test('review round 2: failed nested resize does not invalidate a successful outer notification', async () => {
+  await session(({ term }) => {
+    const hostSizes: number[][] = [];
+    term.onResize(() => {
+      expect(() => term.resize(0, 0)).toThrow();
+    });
+    term.onResize(({ cols, rows }) => hostSizes.push([cols, rows]));
+    term.resize(50, 12);
+    expect(hostSizes).toEqual([[50, 12]]);
+  });
+});
+
+test('review round 2: a throwing resize listener cannot hold reports behind later input', async () => {
+  await session(({ term, data }) => {
+    term.write('\x1b[?2048h');
+    data.length = 0;
+    const failure = new Error('resize observer failure');
+    term.onResize(() => {
+      throw failure;
+    });
+    expect(() => term.resize(50, 12)).toThrow(failure);
+    expect(data.join('')).toContain('\x1b[48;12;50;');
+    const delivered = data.length;
+    term.input('x', true);
+    expect(data.length).toBe(delivered + 1);
+    expect(data.at(-1)).toBe('x');
+    term.write('\x1b[5n');
+    expect(data.slice(delivered + 1)).toEqual(['\x1b[0n']);
+  });
+});
+
+test('review round 2: resize preserves the first error while still restoring rendering and flushing', async () => {
+  await session(({ term }) => {
+    term.write('\x1b[?2048h');
+    const first = new Error('resize observer');
+    let delivered = 0;
+    term.onResize(() => {
+      throw first;
+    });
+    term.onData(() => {
+      delivered++;
+      throw new Error('data observer');
+    });
+    expect(() => term.resize(50, 12)).toThrow(first);
+    expect(delivered).toBe(1);
+    expect([term.cols, term.rows]).toEqual([50, 12]);
   });
 });
 

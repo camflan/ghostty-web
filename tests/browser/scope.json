@@ -757,6 +757,18 @@
       "gaps": ["web-pinned"],
       "unsupported": [],
       "reason": "Legacy retains its pre-native keyboard path: modifier-only report-all keys and paired Kitty releases are not integrated."
+    },
+    {
+      "id": "review.short-scroll-duration-settles-on-exact-rows",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "review.runtime-cursor-style-erases-previous-shape",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     }
   ]
 }

@@ -147,6 +147,36 @@ describe('legacy: replacing a selection repaints the old one', () => {
   });
 });
 
+test('legacy runtime cursor-style changes repaint before drawing the replacement', () => {
+  const { buffer } = screen('legacy');
+  const view = rendererFor(buffer);
+  view.frame();
+  view.renderer.setCursorStyle('underline');
+  expect(view.frame()).toEqual({ rows: [2], cursors: [2] });
+  expect(view.frame()).toEqual({ rows: [], cursors: [2] });
+  view.renderer.setCursorStyle('bar');
+  expect(view.frame()).toEqual({ rows: [2], cursors: [2] });
+});
+
+test('clearing an unpainted replacement also invalidates the last painted selection', () => {
+  const { buffer } = screen('legacy');
+  const view = rendererFor(buffer);
+  const selection = selectionFor(buffer, view.renderer, view.canvas);
+  selection.select(0, 1, 4);
+  view.frame();
+  selection.select(0, 4, 3); // replaced before the next browser paint
+  view.canvas.dispatchEvent(
+    new MouseEvent('mousedown', {
+      button: 0,
+      clientX: 2,
+      clientY: 2,
+      bubbles: true,
+    })
+  );
+  expect(selection.hasSelection()).toBe(false); // no drag yet
+  expect(view.frame().rows).toContain(1); // erase the selection that was actually shown
+});
+
 describe('cursor visibility repaints its row on both engines', () => {
   for (const backend of ['legacy', 'libghostty-vt'] as const) {
     test(`${backend}: hiding and showing the cursor in place`, () => {

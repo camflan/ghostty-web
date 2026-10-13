@@ -135,6 +135,31 @@ describe('hyperlink ids', () => {
   });
 });
 
+test('visible hyperlink ids survive shrinking the pool with an undecoded new link', () => {
+  withTerm(
+    20,
+    3,
+    (t) => {
+      for (let i = 0; i < 1180; i++) t.write(link(`https://history.example/${i}`, 'h') + '\r\n');
+      const uri = 'https://still-visible.example';
+      t.write('\x1b[3;1H' + link(uri, 'L'));
+      const originalId = t.getLine(2)![0].hyperlink_id;
+      expect(originalId).toBeGreaterThan(0);
+      t.clearDirty();
+      for (let y = 0; y < t.getScrollbackLength(); y++) t.getScrollbackLine(y);
+      expect(impl(t).linkIds.size).toBeGreaterThan(3 * 10 * 5 + 1024);
+      t.write('\x1b[H' + link('https://new-before-resize.example', 'n'));
+      t.resize(10, 5);
+      let row = -1;
+      for (let y = 0; y < t.rows; y++) if (t.getHyperlinkUri(y, 0) === uri) row = y;
+      expect(row).toBeGreaterThanOrEqual(0);
+      expect(t.getLine(row)![0].hyperlink_id).toBe(originalId);
+      expect(impl(t).linkIds.size).toBeLessThanOrEqual(3 * t.cols * t.rows + 1024);
+    },
+    2000
+  );
+});
+
 describe('wrapped wide character spacer head', () => {
   const cell = (t: GhosttyTerminal, y: number, x: number) => {
     const c = t.getLine(y)![x];

@@ -415,7 +415,7 @@ export class CanvasRenderer {
     // native-only policy (legacy draws the cursorStyle option).
     const cursorAppearanceChanged =
       cursor.visible !== this.lastCursorVisible ||
-      (nativeCursor && effectiveCursorStyle !== this.lastNativeCursorStyle);
+      effectiveCursorStyle !== this.lastNativeCursorStyle;
     const cursorMoved =
       cursor.x !== this.lastCursorPosition.x ||
       cursor.y !== this.lastCursorPosition.y ||

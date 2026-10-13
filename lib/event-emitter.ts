@@ -7,8 +7,13 @@ export class EventEmitter<T> {
     return this.listeners.length > 0;
   }
 
-  fire(arg: T): void {
-    for (const listener of this.listeners) {
+  fire(arg: T, shouldContinue?: () => boolean): void {
+    // Guarded notifications (resize) use a stable listener snapshot and can
+    // stop when a nested mutation supersedes them. Other events retain their
+    // existing delivery semantics.
+    const listeners = shouldContinue ? [...this.listeners] : this.listeners;
+    for (const listener of listeners) {
+      if (shouldContinue && !shouldContinue()) break;
       listener(arg);
     }
   }

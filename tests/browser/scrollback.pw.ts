@@ -103,6 +103,20 @@ rtest('scroll.wheel-partial-line-delta-shows-contiguous-rows', async (ctx) => {
   ctx.checks.equal('rows-after-100px', await shownLines(fx), expectedViewport(fx, 6));
 });
 
+rtest('review.short-scroll-duration-settles-on-exact-rows', async (ctx) => {
+  const { fx, g } = await fixture(ctx, 10);
+  await wheelLines(ctx, g, 3);
+  await ctx.harness.frame();
+  ctx.checks.equal('subframe-target', (await fx.term.viewport()).viewportY, 3);
+  ctx.checks.equal('subframe-rows', await shownLines(fx), expectedViewport(fx, 3));
+  const scrolls = (await fx.term.events()).scrolls;
+  ctx.checks.equal(
+    'no-negative-scroll-events',
+    scrolls.every((row) => Number.isInteger(row) && row >= 0),
+    true
+  );
+});
+
 rtest('scroll.smooth-wheel-settles-on-exact-rows', async (ctx) => {
   // Animated path (default-style 100 ms easing): only the settled frame is
   // asserted; it must land on whole rows exactly like the instant path.

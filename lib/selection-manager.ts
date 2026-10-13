@@ -349,6 +349,9 @@ export class SelectionManager {
    * Clear the selection
    */
   clearSelection(): void {
+    // The current range may have replaced an older range without a paint yet.
+    // Erase what was actually shown, even while a new click is below drag threshold.
+    this.trackPainted(null);
     if (!this.hasSelection()) return;
 
     // Mark current selection rows as dirty for redraw

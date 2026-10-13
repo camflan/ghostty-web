@@ -138,6 +138,7 @@ export class Terminal implements ITerminalCore {
   private hostQueueHead = 0;
   private dispatchingHostQueue = false;
   private resizeDepth = 0;
+  private resizeGeneration = 0;
 
   // Phase 2: Viewport and scrolling state
   public viewportY: number = 0; // Top line of viewport in scrollback buffer (0 = at bottom, can be fractional during smooth scroll)
@@ -796,29 +797,53 @@ export class Terminal implements ITerminalCore {
     // cleared via requestAnimationFrame (rAF is throttled/paused in background tabs).
     this.cancelRenderLoop();
     this.resizeDepth++;
+    let failed = false;
+    let firstError: unknown;
+    const preserveError = (error: unknown) => {
+      if (!failed) {
+        failed = true;
+        firstError = error;
+      }
+    };
     try {
       this.wasmTerm!.resize(cols, rows);
       this.cols = cols;
       this.rows = rows;
+      const generation = ++this.resizeGeneration;
       this.renderer!.resize(cols, rows);
       this.syncNativeCellSize(false);
-      // Notify the host before sending in-band size reports. A listener may
-      // synchronously write/resize again; queued replies stay behind this barrier.
-      this.resizeEmitter.fire({ cols, rows });
+      // A nested successful resize supersedes remaining notifications from
+      // this one. An invalid nested request must not cancel the outer event.
+      this.resizeEmitter.fire(
+        { cols, rows },
+        () => !this.isDisposed && generation === this.resizeGeneration
+      );
+    } catch (error) {
+      preserveError(error);
     } finally {
       this.resizeDepth--;
       if (!this.isDisposed && this.resizeDepth === 0) {
         try {
           this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
           this.flushWriteQueue();
-        } finally {
+        } catch (error) {
+          preserveError(error);
+        }
+        try {
           this.startRenderLoop();
+        } catch (error) {
+          preserveError(error);
+        }
+        // Even a throwing resize observer cannot strand a report behind later
+        // user input. Data-listener failures must not mask an earlier error.
+        try {
+          this.processTerminalResponses();
+        } catch (error) {
+          preserveError(error);
         }
       }
     }
-    // Listener errors propagate rather than being swallowed as native resize
-    // failures; the host size notification and forced repaint already happened.
-    if (!this.isDisposed && this.resizeDepth === 0) this.processTerminalResponses();
+    if (failed) throw firstError;
   }
 
   /**
@@ -1088,8 +1113,8 @@ export class Terminal implements ITerminalCore {
     // So we SUBTRACT amount (negative amount becomes positive change)
     const newViewportY = Math.max(0, Math.min(maxScroll, this.viewportY - amount));
 
+    this.viewportY = newViewportY;
     if (newViewportY !== before) {
-      this.viewportY = newViewportY;
       this.scrollEmitter.fire(this.viewportY);
 
       // Show scrollbar when scrolling (with auto-hide)
@@ -1114,8 +1139,8 @@ export class Terminal implements ITerminalCore {
     const before = this.viewportY;
     this.cancelWheelScroll(false);
     const scrollbackLength = this.getScrollbackLength();
+    this.viewportY = scrollbackLength;
     if (before !== scrollbackLength) {
-      this.viewportY = scrollbackLength;
       this.scrollEmitter.fire(this.viewportY);
       this.showScrollbar();
     }
@@ -1127,8 +1152,8 @@ export class Terminal implements ITerminalCore {
   public scrollToBottom(): void {
     const before = this.viewportY;
     this.cancelWheelScroll(false);
+    this.viewportY = 0;
     if (before !== 0) {
-      this.viewportY = 0;
       this.scrollEmitter.fire(this.viewportY);
       // Show scrollbar briefly when scrolling to bottom
       if (this.getScrollbackLength() > 0) {
@@ -1147,8 +1172,8 @@ export class Terminal implements ITerminalCore {
     const scrollbackLength = this.getScrollbackLength();
     const newViewportY = Math.max(0, Math.min(scrollbackLength, line));
 
+    this.viewportY = newViewportY;
     if (newViewportY !== before) {
-      this.viewportY = newViewportY;
       this.scrollEmitter.fire(this.viewportY);
 
       // Show scrollbar when scrolling to specific line
@@ -1190,9 +1215,10 @@ export class Terminal implements ITerminalCore {
     // Clamp target to valid range
     const newTarget = Math.max(0, Math.min(maxScroll, targetY));
 
-    // If smooth scrolling is disabled (duration = 0), jump immediately
+    // Durations no longer than one frame settle immediately. The asymptotic
+    // ratio below is zero/negative there; invalid durations are instant too.
     const duration = this.options.smoothScrollDuration ?? 100;
-    if (duration === 0) {
+    if (!Number.isFinite(duration) || duration <= 1000 / 60) {
       if (this.scrollAnimationFrame !== undefined) cancelAnimationFrame(this.scrollAnimationFrame);
       this.scrollAnimationFrame = undefined;
       this.scrollAnimationStartTime = undefined;
@@ -1234,12 +1260,16 @@ export class Terminal implements ITerminalCore {
 
     const duration = this.options.smoothScrollDuration ?? 100;
 
-    // Calculate distance to target
+    // Retention may change between animation frames. Keep both endpoints in
+    // the current history bounds, even when the duration changes mid-flight.
+    const limit = this.getScrollbackLength();
+    this.targetViewportY = Math.max(0, Math.min(limit, this.targetViewportY));
+    this.viewportY = Math.max(0, Math.min(limit, this.viewportY));
     const distance = this.targetViewportY - this.viewportY;
     const absDistance = Math.abs(distance);
 
     // If very close, snap to target
-    if (absDistance < 0.01) {
+    if (absDistance < 0.01 || !Number.isFinite(duration) || duration <= 1000 / 60) {
       this.viewportY = this.targetViewportY;
       this.scrollEmitter.fire(Math.floor(this.viewportY));
 
