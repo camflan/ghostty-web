@@ -233,9 +233,7 @@ export class Terminal implements ITerminalCore {
         break;
 
       case 'theme':
-        if (this.renderer) {
-          console.warn('ghostty-web: theme changes after open() are not yet fully supported');
-        }
+        this.handleThemeChange();
         break;
 
       case 'fontSize':
@@ -272,19 +270,38 @@ export class Terminal implements ITerminalCore {
       this.selectionManager.clearSelection();
     }
 
-    // Resize canvas to match new font metrics
+    // The renderer sizes the canvas for the new metrics: CSS size, backing
+    // store in device pixels and the matching context transform.
     this.renderer.resize(this.cols, this.rows);
     this.syncNativeCellSize();
 
-    // Update canvas element dimensions to match renderer
-    const metrics = this.renderer.getMetrics();
-    this.canvas.width = metrics.width * this.cols;
-    this.canvas.height = metrics.height * this.rows;
-    this.canvas.style.width = `${metrics.width * this.cols}px`;
-    this.canvas.style.height = `${metrics.height * this.rows}px`;
+    // Force full re-render with new font, keeping the scrollbar's current state
+    this.renderer.render(this.wasmTerm, true, this.viewportY, this, this.scrollbarOpacity);
+  }
 
-    // Force full re-render with new font
-    this.renderer.render(this.wasmTerm, true, this.viewportY, this);
+  /**
+   * Apply `options.theme` in place, with the same policy as the constructor
+   * (missing entries fall back to the defaults). libghostty-vt updates its
+   * default colors and palette without touching the buffer, history,
+   * selection, parser or active SGR state; the renderer repaints with the new
+   * theme on its next live frame (a synchronized-output frame being presented
+   * keeps its colors until the hold ends).
+   */
+  private handleThemeChange(): void {
+    if (!this.renderer || !this.wasmTerm) return;
+    if (this.wasmTerm.backend !== 'libghostty-vt') {
+      // The legacy engine resolves cell colors from its construction config
+      // and has no way to change them; repainting only the renderer's colors
+      // would mix two themes.
+      console.warn(
+        'ghostty-web: theme changes after open() need the libghostty-vt engine; ' +
+          'the legacy engine keeps its construction theme'
+      );
+      return;
+    }
+    this.wasmTerm.setColors(this.buildWasmConfig());
+    this.renderer.setTheme(this.options.theme ?? {});
+    this.renderer.render(this.wasmTerm, false, this.viewportY, this, this.scrollbarOpacity);
   }
 
   /** Browser reports use CSS pixels, matching layout and mouse coordinates. */

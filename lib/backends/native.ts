@@ -1620,6 +1620,69 @@ export class NativeTerminal implements TerminalBackend {
   // Configuration
   // ==========================================================================
 
+  /**
+   * Default colors and the 256-color palette, from the colour fields of
+   * `config` (the rest is ignored). Used at construction and for runtime
+   * theme changes, so both follow one policy: presence bits when given, else
+   * the documented 0 = default; an absent foreground/background uses the
+   * legacy defaults, an absent cursor color is unset, and palette entries not
+   * configured come from the built-in palette. Upstream keeps the program's
+   * OSC 4/10/11/12 overrides; existing cells keep their explicit RGB styles,
+   * while palette and default-colored cells resolve to the new colors.
+   */
+  setColors(config: GhosttyTerminalConfig | undefined): void {
+    const s = this.scratch!;
+    const presence = (config as { colorPresence?: ColorPresence } | undefined)?.colorPresence;
+    const present = (flag: boolean | undefined, value: number | undefined) =>
+      flag ?? (value !== undefined && value !== 0);
+    const setRgb = (
+      option: 'COLOR_FOREGROUND' | 'COLOR_BACKGROUND' | 'COLOR_CURSOR',
+      rgb: number | null
+    ) => {
+      if (rgb === null) {
+        this.set(option, 0); // NULL: unset
+        return;
+      }
+      this.writeRgb(s.out, rgb);
+      this.set(option, s.out);
+    };
+    setRgb(
+      'COLOR_FOREGROUND',
+      present(presence?.foreground, config?.fgColor)
+        ? (config?.fgColor ?? 0)
+        : LEGACY_DEFAULT_FOREGROUND
+    );
+    setRgb(
+      'COLOR_BACKGROUND',
+      present(presence?.background, config?.bgColor)
+        ? (config?.bgColor ?? 0)
+        : LEGACY_DEFAULT_BACKGROUND
+    );
+    setRgb(
+      'COLOR_CURSOR',
+      present(presence?.cursor, config?.cursorColor) ? (config?.cursorColor ?? 0) : null
+    );
+    const overrides: [number, number][] = [];
+    for (let i = 0; i < 16; i++) {
+      const value = config?.palette?.[i];
+      const set = presence?.palette !== undefined ? ((presence.palette >> i) & 1) === 1 : !!value;
+      if (set) overrides.push([i, value ?? 0]);
+    }
+    // NULL restores the built-in default palette (a previous theme's entries go).
+    this.set('COLOR_PALETTE', 0);
+    if (overrides.length > 0) {
+      const table = this.abi.alloc(768);
+      try {
+        this.getData('COLOR_PALETTE_DEFAULT', table);
+        for (const [i, rgb] of overrides) this.writeRgb(table + i * 3, rgb);
+        this.set('COLOR_PALETTE', table);
+      } finally {
+        this.abi.free(table, 768);
+      }
+    }
+    this.stale = true;
+  }
+
   private configure(config: GhosttyTerminalConfig | undefined): void {
     const s = this.scratch!;
     const view = () => this.abi.view();
@@ -1644,48 +1707,7 @@ export class NativeTerminal implements TerminalBackend {
       }
     }
 
-    // Colors: presence bits when given, else the documented 0 = default.
-    const presence = (config as { colorPresence?: ColorPresence } | undefined)?.colorPresence;
-    const present = (flag: boolean | undefined, value: number | undefined) =>
-      flag ?? (value !== undefined && value !== 0);
-    const setRgb = (
-      option: 'COLOR_FOREGROUND' | 'COLOR_BACKGROUND' | 'COLOR_CURSOR',
-      rgb: number
-    ) => {
-      this.writeRgb(s.out, rgb);
-      this.set(option, s.out);
-    };
-    setRgb(
-      'COLOR_FOREGROUND',
-      present(presence?.foreground, config?.fgColor)
-        ? (config?.fgColor ?? 0)
-        : LEGACY_DEFAULT_FOREGROUND
-    );
-    setRgb(
-      'COLOR_BACKGROUND',
-      present(presence?.background, config?.bgColor)
-        ? (config?.bgColor ?? 0)
-        : LEGACY_DEFAULT_BACKGROUND
-    );
-    if (present(presence?.cursor, config?.cursorColor)) {
-      setRgb('COLOR_CURSOR', config?.cursorColor ?? 0);
-    }
-    const overrides: [number, number][] = [];
-    for (let i = 0; i < 16; i++) {
-      const value = config?.palette?.[i];
-      const set = presence?.palette !== undefined ? ((presence.palette >> i) & 1) === 1 : !!value;
-      if (set) overrides.push([i, value ?? 0]);
-    }
-    if (overrides.length > 0) {
-      const table = this.abi.alloc(768);
-      try {
-        this.getData('COLOR_PALETTE_DEFAULT', table);
-        for (const [i, rgb] of overrides) this.writeRgb(table + i * 3, rgb);
-        this.set('COLOR_PALETTE', table);
-      } finally {
-        this.abi.free(table, 768);
-      }
-    }
+    this.setColors(config);
 
     // Grapheme clustering on by default, and restored by RIS.
     const M = this.L.modeConfig;

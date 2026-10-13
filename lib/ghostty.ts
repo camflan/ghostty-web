@@ -409,6 +409,19 @@ export class GhosttyTerminal {
   }
 
   /**
+   * @internal libghostty-vt only: replace the default colors and palette in
+   * place from the colour fields of `config` (scrollback is ignored), with the
+   * same policy as `createTerminal`. Buffer, history, selection, parser state
+   * and the active SGR style are untouched; the program's OSC color overrides
+   * and explicit RGB cell colors stay, palette/default-colored cells change.
+   */
+  setColors(config: GhosttyTerminalConfig | undefined): void {
+    this.assertLive();
+    if (!this.impl.setColors) throw nativeOnly(this.kind, 'setColors');
+    this.impl.setColors(config);
+  }
+
+  /**
    * @internal libghostty-vt only: encode a pointer event for the terminal's
    * current mouse modes with the native encoder (tracking mode, format, motion
    * dedup, out-of-view handling). Returns an owned copy of the raw bytes, which

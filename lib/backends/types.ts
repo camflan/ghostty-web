@@ -141,6 +141,11 @@ export interface TerminalBackend {
   /** Default cursor applied now if the program hasn't chosen one, and on reset/DECSCUSR 0. */
   setDefaultCursorStyle?(style: 'block' | 'underline' | 'bar', blink: boolean): void;
   /**
+   * Replace the default colors and palette with the colour fields of `config`
+   * (same policy as construction); program OSC overrides and cell styles stay.
+   */
+  setColors?(config: GhosttyTerminalConfig | undefined): void;
+  /**
    * Encode a host mouse event for the terminal's current mouse modes. Returns
    * an owned copy of the raw bytes (X10 may contain bytes >= 0x80 that are not
    * UTF-8); empty when the event is not reported.

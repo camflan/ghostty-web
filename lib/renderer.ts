@@ -117,6 +117,8 @@ export class CanvasRenderer {
   private cursorStyle: 'block' | 'underline' | 'bar';
   private cursorBlink: boolean;
   private theme: Required<ITheme>;
+  // Theme set by setTheme() and not yet drawn (see render())
+  private pendingTheme?: ITheme;
   private devicePixelRatio: number;
   private readonly followsWindowDevicePixelRatio: boolean;
   private metrics: FontMetrics;
@@ -236,8 +238,29 @@ export class CanvasRenderer {
 
     // Add 2px padding to height to account for glyphs that overflow (like 'f', 'd', 'g', 'p')
     // and anti-aliasing pixels
-    const height = Math.ceil(ascent + descent) + 2;
-    const baseline = Math.ceil(ascent) + 1; // Offset baseline by half the padding
+    let height = Math.ceil(ascent + descent) + 2;
+    let baseline = Math.ceil(ascent) + 1; // Offset baseline by half the padding
+
+    // 'M' alone does not bound the font: at some sizes ascenders, brackets,
+    // '|', '$' or descenders reach past the box above. Grow the cell only by
+    // the ink of printable ASCII that does not fit, so sizes where everything
+    // already fits keep exactly the metrics above.
+    let inkAscent = 0;
+    let inkDescent = 0;
+    for (let code = 0x21; code <= 0x7e; code++) {
+      const glyph = ctx.measureText(String.fromCharCode(code));
+      // Without ink metrics (e.g. a DOM shim), keep the box above.
+      if (Number.isFinite(glyph.actualBoundingBoxAscent)) {
+        inkAscent = Math.max(inkAscent, glyph.actualBoundingBoxAscent);
+      }
+      if (Number.isFinite(glyph.actualBoundingBoxDescent)) {
+        inkDescent = Math.max(inkDescent, glyph.actualBoundingBoxDescent);
+      }
+    }
+    const extraAbove = Math.max(0, Math.ceil(inkAscent - baseline));
+    const extraBelow = Math.max(0, Math.ceil(inkDescent - (height - baseline)));
+    baseline += extraAbove;
+    height += extraAbove + extraBelow;
 
     return { width, height, baseline };
   }
@@ -308,10 +331,21 @@ export class CanvasRenderer {
     // Synchronized output: draw the held frame (every read below, including
     // graphemes, cursor and dirty tracking, then comes from it).
     let heldHistory: number | undefined;
+    let held = false;
     if (buffer.getPresentation && viewportY === 0 && !this.selectionManager?.hasSelection()) {
       const presentation = buffer.getPresentation();
-      if (presentation !== buffer) heldHistory = presentation.getScrollbackLength?.();
+      if (presentation !== buffer) {
+        held = true;
+        heldHistory = presentation.getScrollbackLength?.();
+      }
       buffer = presentation;
+    }
+
+    // A new theme takes effect with the first live frame, repainting every row.
+    if (this.pendingTheme && !held) {
+      this.applyTheme(this.pendingTheme);
+      this.pendingTheme = undefined;
+      forceAll = true;
     }
 
     // Store buffer reference for grapheme lookups in renderCell
@@ -964,6 +998,13 @@ export class CanvasRenderer {
    * Update theme colors
    */
   public setTheme(theme: ITheme): void {
+    // Applied by the next render() that draws live content, which repaints
+    // every row: a synchronized-output frame being presented keeps the colors
+    // it was captured with (see render()).
+    this.pendingTheme = theme ?? {};
+  }
+
+  private applyTheme(theme: ITheme): void {
     this.theme = { ...DEFAULT_THEME, ...theme };
 
     // Rebuild palette
