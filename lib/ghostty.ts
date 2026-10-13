@@ -287,6 +287,7 @@ export class GhosttyTerminal {
   private _cols: number;
   private _rows: number;
   private freed = false;
+  private pendingHighSurrogate = '';
   /** Active render hold seen last (0: none) and when it was first seen (see `getPresentation`). */
   private holdId = 0;
   private holdSince = 0;
@@ -330,7 +331,29 @@ export class GhosttyTerminal {
   /** Feed VT data. An empty write is a no-op. */
   write(data: string | Uint8Array): void {
     this.assertLive();
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    if (data.length === 0) return;
+    let bytes: Uint8Array;
+    if (typeof data === 'string') {
+      // TextEncoder is stateless; retain only an incomplete UTF-16 pair across
+      // string chunks before handing complete UTF-8 to Ghostty's VT parser.
+      let text = this.pendingHighSurrogate + data;
+      this.pendingHighSurrogate = '';
+      const last = text.charCodeAt(text.length - 1);
+      if (last >= 0xd800 && last <= 0xdbff) {
+        this.pendingHighSurrogate = text.slice(-1);
+        text = text.slice(0, -1);
+      }
+      bytes = new TextEncoder().encode(text);
+    } else if (this.pendingHighSurrogate) {
+      // A nonempty byte write is an encoding boundary. Flush the unmatched
+      // surrogate as U+FFFD before the bytes; never reorder it past raw input.
+      this.pendingHighSurrogate = '';
+      bytes = new Uint8Array(data.length + 3);
+      bytes.set([0xef, 0xbf, 0xbd]);
+      bytes.set(data, 3);
+    } else {
+      bytes = data;
+    }
     if (bytes.length === 0) return;
     this.impl.write(bytes);
     // A hold that began in this write starts its timeout now.
@@ -349,6 +372,7 @@ export class GhosttyTerminal {
   free(): void {
     if (this.freed) return;
     this.freed = true;
+    this.pendingHighSurrogate = '';
     terminalImpls.delete(this);
     this.impl.free();
   }

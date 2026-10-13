@@ -464,6 +464,37 @@ terminal lifetimes. New browser cases check same-write prefix capture and
 back-to-back holds against independent rendered frames, plus timeout release.
 Legacy still lacks this presentation bridge, so its explicit sync gaps remain.
 
+## Shared viewport and input-edge checkpoint
+
+The renderer resolves graphemes from the same history or active row that supplied
+each cell. Cell lookup and hyperlink lookup use one floored row offset during
+smooth animation, so the history/screen boundary cannot select a nonexistent row.
+Local wheel input accumulates sub-line remainder but targets whole rows; bursts
+accumulate against the pending destination instead of the lagging animated view.
+Outward input at a clamped boundary leaves no overscroll debt. Explicit navigation,
+reset, application-owned input and new output supersede pending wheel state. This
+retains the existing jump-to-bottom-on-output policy rather than changing it.
+
+Scrollbar drags are tracked at document capture scope, so leaving the canvas no
+longer strands the thumb. Mouseup, window blur and disposal end that ownership;
+ordinary link-hover movement remains local and throttled.
+
+String writes retain a trailing high surrogate until another string completes it.
+Empty writes and resize preserve it. A nonempty byte write is an encoding boundary:
+an unmatched surrogate is flushed as U+FFFD before those bytes, preserving order
+and the existing TextEncoder malformed-input policy rather than reordering the
+character across raw input. State is per terminal and is discarded on free; RIS
+continues to clear parsed terminal state normally.
+
+`disableStdin` now consumes and discards terminal replies on both engines, including
+resize-generated replies. Re-enabling it does not replay old replies. Native bells
+and titles remain live, and an ordered event listener's current stdin policy is
+respected when a subsequent reply is dispatched.
+
+The two original core gaps and three browser gaps pass unchanged on both engines.
+This checkpoint passed 1,053 Bun tests, required core 325 native / 278 legacy and
+required browser 111 native / 85 legacy, with no image changes or failure waivers.
+
 ## Remaining API and policy decisions
 
 The shipping Ghostty source remains unpatched at the reviewed pin. Two API limits

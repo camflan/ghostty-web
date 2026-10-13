@@ -445,10 +445,9 @@
     },
     {
       "id": "text.history-row-grapheme-matches-active-row",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "WEB-09/RT-12 [js-layer]: When scrolled, the renderer looks up graphemes with the viewport row on the active screen, so the history cell draws active-row text ('L') instead of e+U+0301. (provenance: tests/gaps/browser/history/known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "perf.forced-frame-decodes-viewport-once",
@@ -531,10 +530,9 @@
     },
     {
       "id": "scroll.wheel-partial-line-delta-shows-contiguous-rows",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "WEB-09/IX-02 [js-layer]: A pixel wheel delta that is not a whole number of rows leaves viewportY fractional (6.25); the renderer then fetches the boundary row from scrollback index scrollbackLength (past the end) and draws a wrong line (594) on row 6. Native Ghostty scrolls whole rows and keeps the remainder. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "scroll.smooth-wheel-settles-on-exact-rows",
@@ -550,10 +548,9 @@
     },
     {
       "id": "scroll.scrollbar-drag-past-top-clamps-to-oldest",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "WEB-09/IX-01 [js-layer]: Scrollbar drag motion is only handled by a mousemove listener on the terminal element, so once the pointer leaves it the thumb stops at the last in-element position (viewportY 571) instead of clamping to the top (588). (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "scroll.output-while-viewing-history-jumps-to-bottom",

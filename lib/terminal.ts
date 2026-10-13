@@ -141,6 +141,8 @@ export class Terminal implements ITerminalCore {
   // Phase 2: Viewport and scrolling state
   public viewportY: number = 0; // Top line of viewport in scrollback buffer (0 = at bottom, can be fractional during smooth scroll)
   private targetViewportY: number = 0; // Target viewport position for smooth scrolling
+  private wheelRemainder = 0; // Pending sub-line wheel input
+  private wheelCellHeight = 0;
   private scrollAnimationStartTime?: number;
   private scrollAnimationStartY?: number;
   private scrollAnimationFrame?: number;
@@ -569,6 +571,8 @@ export class Terminal implements ITerminalCore {
 
       // Setup document-level mouseup for scrollbar drag (so drag works even outside canvas)
       document.addEventListener('mouseup', this.handleMouseUp);
+      document.addEventListener('mousemove', this.handleScrollbarMouseMove, true);
+      window.addEventListener('blur', this.handleMouseUp);
 
       // Setup wheel event handling for scrolling (Phase 2)
       // Use capture phase to ensure we get the event before browser scrolling
@@ -657,9 +661,9 @@ export class Terminal implements ITerminalCore {
     this.linkDetector?.invalidateCache();
 
     // Phase 2: Auto-scroll to bottom on new output (xterm.js behavior)
-    if (this.viewportY !== 0) {
-      this.scrollToBottom();
-    }
+    // New output still follows the existing jump-to-bottom policy, including
+    // an unfinished wheel animation whose first frame has not moved yet.
+    this.scrollToBottom();
 
     // Check for title changes (OSC 0, 1, 2 sequences)
     // Legacy heuristic only; libghostty-vt reports titles natively (above)
@@ -835,6 +839,7 @@ export class Terminal implements ITerminalCore {
 
     // Host state first, so nothing renders against the pre-reset buffer.
     this.inputHandler?.resetMouseState();
+    this.cancelWheelScroll();
     this.selectionManager?.clearSelection();
     if (this.scrollAnimationFrame) {
       cancelAnimationFrame(this.scrollAnimationFrame);
@@ -1053,6 +1058,7 @@ export class Terminal implements ITerminalCore {
    * @param amount Number of lines to scroll (positive = down, negative = up)
    */
   public scrollLines(amount: number): void {
+    this.cancelWheelScroll();
     if (!this.wasmTerm) {
       throw new Error('Terminal not open');
     }
@@ -1091,6 +1097,7 @@ export class Terminal implements ITerminalCore {
    * Scroll viewport to the top of the scrollback buffer
    */
   public scrollToTop(): void {
+    this.cancelWheelScroll();
     const scrollbackLength = this.getScrollbackLength();
     if (scrollbackLength > 0 && this.viewportY !== scrollbackLength) {
       this.viewportY = scrollbackLength;
@@ -1103,6 +1110,7 @@ export class Terminal implements ITerminalCore {
    * Scroll viewport to the bottom (current output)
    */
   public scrollToBottom(): void {
+    this.cancelWheelScroll();
     if (this.viewportY !== 0) {
       this.viewportY = 0;
       this.scrollEmitter.fire(this.viewportY);
@@ -1118,6 +1126,7 @@ export class Terminal implements ITerminalCore {
    * @param line Line number (0 = top of scrollback, scrollbackLength = bottom)
    */
   public scrollToLine(line: number): void {
+    this.cancelWheelScroll();
     const scrollbackLength = this.getScrollbackLength();
     const newViewportY = Math.max(0, Math.min(scrollbackLength, line));
 
@@ -1132,10 +1141,19 @@ export class Terminal implements ITerminalCore {
     }
   }
 
-  /**
-   * Smoothly scroll to a target viewport position
-   * @param targetY Target viewport Y position (in lines, can be fractional)
-   */
+  /** Explicit navigation supersedes pending wheel input and animation. */
+  private cancelWheelScroll(): void {
+    this.wheelRemainder = 0;
+    if (this.scrollAnimationFrame !== undefined) {
+      cancelAnimationFrame(this.scrollAnimationFrame);
+      this.scrollAnimationFrame = undefined;
+    }
+    this.scrollAnimationStartTime = undefined;
+    this.scrollAnimationStartY = undefined;
+    this.targetViewportY = this.viewportY;
+  }
+
+  /** Smoothly interpolate to a target position; wheel input supplies whole rows. */
   private smoothScrollTo(targetY: number): void {
     if (!this.wasmTerm) return;
 
@@ -1148,6 +1166,10 @@ export class Terminal implements ITerminalCore {
     // If smooth scrolling is disabled (duration = 0), jump immediately
     const duration = this.options.smoothScrollDuration ?? 100;
     if (duration === 0) {
+      if (this.scrollAnimationFrame !== undefined) cancelAnimationFrame(this.scrollAnimationFrame);
+      this.scrollAnimationFrame = undefined;
+      this.scrollAnimationStartTime = undefined;
+      this.scrollAnimationStartY = undefined;
       this.viewportY = newTarget;
       this.targetViewportY = newTarget;
       this.scrollEmitter.fire(Math.floor(this.viewportY));
@@ -1435,6 +1457,11 @@ export class Terminal implements ITerminalCore {
     return this.wasmTerm.getScrollbackLength();
   }
 
+  /** Cluster lookup paired with getScrollbackLine for renderer history rows. */
+  public getScrollbackGraphemeString(offset: number, col: number): string {
+    return this.wasmTerm?.getScrollbackGraphemeString(offset, col) ?? ' ';
+  }
+
   /**
    * Clean up components (called on dispose or error)
    */
@@ -1447,6 +1474,7 @@ export class Terminal implements ITerminalCore {
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', this.handleWindowFocus);
       window.removeEventListener('blur', this.handleWindowBlur);
+      window.removeEventListener('blur', this.handleMouseUp);
     }
     this.hostFocused = false;
 
@@ -1503,6 +1531,7 @@ export class Terminal implements ITerminalCore {
     // isOpen before getting here, so this must not depend on it.
     if (typeof document !== 'undefined') {
       document.removeEventListener('mouseup', this.handleMouseUp);
+      document.removeEventListener('mousemove', this.handleScrollbarMouseMove, true);
     }
 
     // Dispose link detector
@@ -1535,18 +1564,17 @@ export class Terminal implements ITerminalCore {
     }
   }
 
-  /**
-   * Handle mouse move for link hover detection and scrollbar dragging
-   * Throttled to avoid blocking scroll events (except when dragging scrollbar)
-   */
+  /** Document-level capture keeps an active scrollbar drag working outside the canvas. */
+  private handleScrollbarMouseMove = (e: MouseEvent): void => {
+    if (!this.isDisposed && this.isDraggingScrollbar) this.processScrollbarDrag(e);
+  };
+
+  /** Handle link hover motion, throttled independently from document-level scrollbar dragging. */
   private handleMouseMove = (e: MouseEvent): void => {
     if (!this.canvas || !this.renderer || !this.wasmTerm) return;
 
     // If dragging scrollbar, handle immediately without throttling
-    if (this.isDraggingScrollbar) {
-      this.processScrollbarDrag(e);
-      return;
-    }
+    if (this.isDraggingScrollbar) return;
 
     if (!this.linkDetector) return;
 
@@ -1804,17 +1832,22 @@ export class Terminal implements ITerminalCore {
 
     // Allow custom handler to override
     if (this.customWheelEventHandler && this.customWheelEventHandler(e)) {
+      this.cancelWheelScroll();
       return;
     }
 
     // Application tracking takes precedence over local history and alternate-screen
     // arrow fallback. The legacy backend keeps its existing routing behavior.
-    if (this.inputHandler?.handleNativeWheel(e)) return;
+    if (this.inputHandler?.handleNativeWheel(e)) {
+      this.cancelWheelScroll();
+      return;
+    }
 
     // Check if in alternate screen mode (vim, less, htop, etc.)
     const isAltScreen = this.wasmTerm?.isAlternateScreen() ?? false;
 
     if (isAltScreen) {
+      this.cancelWheelScroll();
       // Alternate screen: send arrow keys to the application
       // Applications like vim handle scrolling internally
       // Standard: ~3 arrow presses per wheel "click"
@@ -1829,14 +1862,18 @@ export class Terminal implements ITerminalCore {
         }
       }
     } else {
-      // Normal screen: scroll viewport through history with smooth scrolling
-      // Handle different deltaMode values for better trackpad/mouse support
+      // Normal screen: retain sub-line input but only target whole rows.
+      // Animation may interpolate; renderer/selection row lookups quantize it.
+      const lineHeight = this.renderer?.getMetrics()?.height ?? 20;
+      if (lineHeight !== this.wheelCellHeight) {
+        this.wheelRemainder = 0;
+        this.wheelCellHeight = lineHeight;
+      }
       let deltaLines: number;
 
       if (e.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
         // Pixel mode (trackpads): convert pixels to lines
         // Use actual line height from renderer for accurate conversion
-        const lineHeight = this.renderer?.getMetrics()?.height ?? 20;
         deltaLines = e.deltaY / lineHeight;
       } else if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
         // Line mode (some mice): use directly
@@ -1849,14 +1886,30 @@ export class Terminal implements ITerminalCore {
         deltaLines = e.deltaY / 33;
       }
 
-      // Use smooth scrolling for any amount (no rounding needed)
-      if (deltaLines !== 0) {
-        // Calculate target position
-        // deltaY > 0 = scroll down (decrease viewportY)
-        // deltaY < 0 = scroll up (increase viewportY)
-        const targetY = this.viewportY - deltaLines;
-        this.smoothScrollTo(targetY);
+      if (!Number.isFinite(deltaLines) || deltaLines === 0) return;
+      const limit = this.getScrollbackLength();
+      // Rapid wheel packets accumulate against the pending destination, not
+      // the lagging animated position (which would lose most of their input).
+      const base = Math.floor(
+        this.scrollAnimationFrame !== undefined ? this.targetViewportY : this.viewportY
+      );
+      const total = this.wheelRemainder + deltaLines;
+      if ((base <= 0 && total > 0) || (base >= limit && total < 0)) {
+        this.wheelRemainder = 0; // no overscroll debt at either boundary
+        return;
       }
+      const whole = Math.trunc(total + Math.sign(total) * 1e-9);
+      this.wheelRemainder = total - whole;
+      if (Math.abs(this.wheelRemainder) < 1e-9) this.wheelRemainder = 0;
+      if (whole === 0) return;
+      const target = Math.max(0, Math.min(limit, base - whole));
+      if (
+        (target === 0 && this.wheelRemainder > 0) ||
+        (target === limit && this.wheelRemainder < 0)
+      ) {
+        this.wheelRemainder = 0;
+      }
+      this.smoothScrollTo(target);
     }
   };
 
@@ -2105,7 +2158,8 @@ export class Terminal implements ITerminalCore {
       if (response === null) break;
       // Send response back to the PTY via onData
       // This is the same path as user keyboard input
-      this.dataEmitter.fire(response);
+      // Consume even when disabled: re-enabling stdin must not replay replies.
+      if (!this.options.disableStdin) this.dataEmitter.fire(response);
     }
   }
 
@@ -2132,7 +2186,7 @@ export class Terminal implements ITerminalCore {
         switch (event.type) {
           case 'reply':
             // Send response back to the PTY via onData (same path as user input)
-            this.dataEmitter.fire(event.data);
+            if (!this.options.disableStdin) this.dataEmitter.fire(event.data);
             break;
           case 'bell':
             this.bellEmitter.fire();

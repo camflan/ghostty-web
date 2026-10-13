@@ -52,6 +52,7 @@ export interface IRenderable {
 export interface IScrollbackProvider {
   getScrollbackLine(offset: number): GhosttyCell[] | null;
   getScrollbackLength(): number;
+  getScrollbackGraphemeString?(offset: number, col: number): string;
 }
 
 // ============================================================================
@@ -133,6 +134,9 @@ export class CanvasRenderer {
 
   // Current buffer being rendered (for grapheme lookups)
   private currentBuffer: IRenderable | null = null;
+  private currentHistory?: IScrollbackProvider;
+  private currentRowOffset = 0;
+  private currentHistoryLength = 0;
 
   // Viewport lines of the frame being rendered (a band also draws the row below)
   private frameLine?: (y: number) => GhosttyCell[] | null;
@@ -319,6 +323,12 @@ export class CanvasRenderer {
     const dims = buffer.getDimensions();
     const scrollbackLength =
       heldHistory ?? (scrollbackProvider ? scrollbackProvider.getScrollbackLength() : 0);
+    // Smooth animation may be fractional, but cell/grid lookups always use the
+    // same whole-row boundary, including glyphs that overflow from a neighbor.
+    const rowOffset = Math.max(0, Math.floor(viewportY));
+    this.currentHistory = scrollbackProvider;
+    this.currentRowOffset = rowOffset;
+    this.currentHistoryLength = scrollbackLength;
 
     // Check if buffer needs full redraw (e.g., screen change between normal/alternate)
     if (buffer.needsFullRedraw?.()) {
@@ -414,24 +424,7 @@ export class CanvasRenderer {
       // Find rows containing the old or new hovered hyperlink
       // Must check the correct buffer based on viewportY (scrollback vs screen)
       for (let y = 0; y < dims.rows; y++) {
-        let line: GhosttyCell[] | null = null;
-
-        // Same logic as rendering: fetch from scrollback or screen
-        if (viewportY > 0) {
-          if (y < viewportY && scrollbackProvider) {
-            // This row is from scrollback
-            // Floor viewportY for array access (handles fractional values during smooth scroll)
-            const scrollbackOffset = scrollbackLength - Math.floor(viewportY) + y;
-            line = scrollbackProvider.getScrollbackLine(scrollbackOffset);
-          } else {
-            // This row is from visible screen
-            const screenRow = y - Math.floor(viewportY);
-            line = buffer.getLine(screenRow);
-          }
-        } else {
-          // At bottom - fetch from visible screen
-          line = buffer.getLine(y);
-        }
+        const line = this.fetchLine(buffer, y, rowOffset, scrollbackProvider, scrollbackLength);
 
         if (line) {
           for (const cell of line) {
@@ -498,7 +491,7 @@ export class CanvasRenderer {
     this.frameLine = (y: number): GhosttyCell[] | null => {
       if (y < 0 || y >= dims.rows) return null;
       if (lines[y] === undefined) {
-        lines[y] = this.fetchLine(buffer, y, viewportY, scrollbackProvider, scrollbackLength);
+        lines[y] = this.fetchLine(buffer, y, rowOffset, scrollbackProvider, scrollbackLength);
       }
       return lines[y] ?? null;
     };
@@ -549,6 +542,7 @@ export class CanvasRenderer {
     scrollbackProvider: IScrollbackProvider | undefined,
     scrollbackLength: number
   ): GhosttyCell[] | null {
+    viewportY = Math.max(0, Math.floor(viewportY));
     if (viewportY > 0) {
       // Scrolled up - need to fetch from scrollback + visible screen
       // When scrolled up N lines, we want to show:
@@ -675,9 +669,17 @@ export class CanvasRenderer {
 
   /** Text drawn for a cell: its full grapheme cluster, or its single codepoint. */
   private cellText(cell: GhosttyCell, x: number, y: number): string {
-    if (cell.grapheme_len > 0 && this.currentBuffer?.getGraphemeString) {
-      // Cell has additional codepoints - get full grapheme cluster
-      return this.currentBuffer.getGraphemeString(y, x);
+    if (cell.grapheme_len > 0) {
+      // Fetch the cluster from exactly the row that supplied this cell, not
+      // the unrelated active row at the same on-canvas y coordinate.
+      const cluster =
+        y < this.currentRowOffset && this.currentHistory
+          ? this.currentHistory.getScrollbackGraphemeString?.(
+              this.currentHistoryLength - this.currentRowOffset + y,
+              x
+            )
+          : this.currentBuffer?.getGraphemeString?.(y - this.currentRowOffset, x);
+      if (cluster !== undefined) return cluster;
     }
     // Simple cell - single codepoint
     return String.fromCodePoint(cell.codepoint || 32); // Default to space if null

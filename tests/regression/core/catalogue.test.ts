@@ -121,7 +121,12 @@ describe('core scope plan', () => {
   });
 
   test('verified fixes retain their required native or shared scope', () => {
-    for (const id of ['api.buffer-translate-keeps-blank-cells', 'api.buffer-get-chars-grapheme']) {
+    for (const id of [
+      'api.buffer-translate-keeps-blank-cells',
+      'api.buffer-get-chars-grapheme',
+      'reply.disable-stdin-suppresses-replies',
+      'frag.string-surrogate-pair-split',
+    ]) {
       for (const engine of ENGINES) expect(caseScope(plan, id, engine)).toBe('required');
     }
     for (const id of NATIVE_FIXED) {

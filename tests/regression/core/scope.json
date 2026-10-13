@@ -892,10 +892,9 @@
     },
     {
       "id": "reply.disable-stdin-suppresses-replies",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "IN-11 (js-layer, gap on both engines): disableStdin filters only InputHandler; terminal replies still fire onData (xterm.js drops them)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "event.bell",
@@ -969,10 +968,9 @@
     },
     {
       "id": "frag.string-surrogate-pair-split",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "IN-10 (js-layer, gap on both engines): GhosttyTerminal.write encodes each string chunk independently, so a surrogate pair split across write(string) calls becomes two U+FFFD (xterm.js keeps the pending high surrogate)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "wide.cjk-occupies-two-cells",
