@@ -70,7 +70,7 @@ export class SelectionManager {
    * so the JS half must not be overwritten by a re-read until it is completed.
    */
   private halfAssigned = false;
-  /** Native only: the viewport rows painted for the selection last frame. */
+  /** The viewport rows painted for the selection last frame (both engines). */
   private paintedCoords: SelectionCoordinates | null = null;
   private isSelecting: boolean = false;
   private mouseDownX: number = 0;
@@ -197,7 +197,11 @@ export class SelectionManager {
     this.wasmTerm.setSelectionRange(clamp(this.start), clamp(this.end));
   }
 
-  /** Native: rows painted last frame need a redraw when the selection moved or vanished. */
+  /**
+   * Rows painted last frame need a redraw when the selection moved or
+   * vanished, whatever replaced it: a new select()/selectLines() range, a
+   * native selection following its content, or one the terminal dropped.
+   */
   private trackPainted(coords: SelectionCoordinates | null): void {
     const last = this.paintedCoords;
     const same =
@@ -314,9 +318,9 @@ export class SelectionManager {
    */
   hasSelection(): boolean {
     if (!this.selectionStart || !this.selectionEnd) {
-      // Native: a selection the terminal dropped (screen switch, reset) must
-      // also stop being painted.
-      if (this.nativeSelection) this.trackPainted(null);
+      // A selection that is gone (cleared, or dropped by the native terminal
+      // on a screen switch or reset) must also stop being painted.
+      this.trackPainted(null);
       return false;
     }
 
@@ -493,7 +497,7 @@ export class SelectionManager {
    */
   getSelectionCoords(): SelectionCoordinates | null {
     const coords = this.normalizeSelection();
-    if (this.nativeSelection) this.trackPainted(coords);
+    this.trackPainted(coords);
     return coords;
   }
 

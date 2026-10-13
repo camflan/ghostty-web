@@ -411,10 +411,11 @@ export class CanvasRenderer {
     if (nativeCursor && cursor.blinking !== undefined && cursor.blinking !== this.cursorBlink) {
       this.setCursorBlink(cursor.blinking);
     }
+    // Visibility (DECTCEM) is reported by both engines; the reported style is
+    // native-only policy (legacy draws the cursorStyle option).
     const cursorAppearanceChanged =
-      nativeCursor &&
-      (cursor.visible !== this.lastCursorVisible ||
-        effectiveCursorStyle !== this.lastNativeCursorStyle);
+      cursor.visible !== this.lastCursorVisible ||
+      (nativeCursor && effectiveCursorStyle !== this.lastNativeCursorStyle);
     const cursorMoved =
       cursor.x !== this.lastCursorPosition.x ||
       cursor.y !== this.lastCursorPosition.y ||
