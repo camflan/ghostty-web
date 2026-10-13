@@ -155,6 +155,18 @@ const KEY_MAP: Record<string, Key> = {
   F24: Key.F24,
 };
 
+// Native report-all mode can encode lone modifiers; legacy browser policy stays unchanged.
+const NATIVE_MODIFIER_KEYS: Readonly<Record<string, Key>> = {
+  ShiftLeft: Key.SHIFT_LEFT,
+  ShiftRight: Key.SHIFT_RIGHT,
+  ControlLeft: Key.CONTROL_LEFT,
+  ControlRight: Key.CONTROL_RIGHT,
+  AltLeft: Key.ALT_LEFT,
+  AltRight: Key.ALT_RIGHT,
+  MetaLeft: Key.META_LEFT,
+  MetaRight: Key.META_RIGHT,
+};
+
 // DOM resolves NumLock-off keypad keys to navigation names. Preserve that
 // distinction when translating into Ghostty's physical/semantic key enum.
 const NATIVE_KEYPAD_NAVIGATION: Readonly<Record<string, Key>> = {
@@ -223,8 +235,9 @@ export class InputHandler {
   private encoder: KeyEncoder;
   private container: HTMLElement;
   private inputElement?: HTMLElement;
-  private onDataCallback: (data: string) => void;
+  private onDataCallback: (data: string, preserveSelection?: boolean) => void;
   private onBinaryCallback?: (data: string) => boolean;
+  private isInputEnabled?: () => boolean;
   private onBellCallback: () => void;
   private onKeyCallback?: (keyEvent: IKeyEvent) => void;
   private customKeyEventHandler?: (event: KeyboardEvent) => boolean;
@@ -233,7 +246,11 @@ export class InputHandler {
   private keyupListener: ((e: KeyboardEvent) => void) | null = null;
   // Only encode native releases for presses this handler forwarded to the application.
   private readonly forwardedNativeKeys = new Set<string>();
-  private readonly clearForwardedNativeKeys = (): void => this.forwardedNativeKeys.clear();
+  private readonly clearForwardedNativeKeys = (event: FocusEvent): void => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && this.container.contains(next)) return;
+    this.forwardedNativeKeys.clear();
+  };
   private onCopyCallback?: () => boolean;
   private mouseConfig?: MouseTrackingConfig;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
@@ -267,7 +284,10 @@ export class InputHandler {
     )
       this.handleMouseUp(event);
   };
-  private readonly handleMouseBlur = (): void => this.resetMouseState();
+  private readonly handleMouseBlur = (): void => {
+    this.forwardedNativeKeys.clear();
+    this.resetMouseState();
+  };
   private lastKeyDownData: string | null = null;
   private lastKeyDownTime = 0;
   private lastPasteData: string | null = null;
@@ -295,7 +315,7 @@ export class InputHandler {
   constructor(
     ghostty: Ghostty,
     container: HTMLElement,
-    onData: (data: string) => void,
+    onData: (data: string, preserveSelection?: boolean) => void,
     onBell: () => void,
     onKey?: (keyEvent: IKeyEvent) => void,
     customKeyEventHandler?: (event: KeyboardEvent) => boolean,
@@ -304,13 +324,15 @@ export class InputHandler {
     inputElement?: HTMLElement,
     mouseConfig?: MouseTrackingConfig,
     getTerminal?: () => GhosttyTerminal | undefined,
-    onBinary?: (data: string) => boolean
+    onBinary?: (data: string) => boolean,
+    isInputEnabled?: () => boolean
   ) {
     this.encoder = ghostty.createKeyEncoder();
     this.container = container;
     this.inputElement = inputElement;
     this.onDataCallback = onData;
     this.onBinaryCallback = onBinary;
+    this.isInputEnabled = isInputEnabled;
     this.onBellCallback = onBell;
     this.onKeyCallback = onKey;
     this.customKeyEventHandler = customKeyEventHandler;
@@ -358,7 +380,7 @@ export class InputHandler {
       }
     };
     this.container.addEventListener('keyup', this.keyupListener);
-    // Capture blur from the hidden textarea too; the next release may belong to another app.
+    // Clear ownership only when focus leaves the whole terminal, not on internal transfers.
     this.container.addEventListener('blur', this.clearForwardedNativeKeys, true);
     this.keydownListener = this.handleKeyDown.bind(this);
     this.container.addEventListener('keydown', this.keydownListener);
@@ -676,8 +698,10 @@ export class InputHandler {
     // through composition/beforeinput, not through a fabricated terminal key.
     if (event.key === 'Dead' || event.key === 'Process') return;
     const printable = Array.from(event.key).length === 1;
+    const modifier = NATIVE_MODIFIER_KEYS[event.code];
     const mapped =
       (event.code.startsWith('Numpad') ? NATIVE_KEYPAD_NAVIGATION[event.key] : undefined) ??
+      modifier ??
       this.mapKeyCode(event.code);
     if (mapped === null && !printable) return;
     const key = mapped ?? Key.UNIDENTIFIED;
@@ -719,12 +743,16 @@ export class InputHandler {
       unshiftedCodepoint: unshifted.codePointAt(0) ?? 0,
       composing: false,
     });
-    event.preventDefault();
-    event.stopPropagation();
+    // Ordinary modifier presses remain browser-owned when the native protocol
+    // has no report for them. Report-all mode still uses the native encoder.
+    if (modifier === undefined || encoded.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
     const data = new TextDecoder().decode(encoded);
-    if (data) {
+    if (data && this.isInputEnabled?.() !== false) {
       if (action !== KeyAction.RELEASE) this.forwardedNativeKeys.add(event.code || event.key);
-      this.onDataCallback(data);
+      this.onDataCallback(data, modifier !== undefined);
       if (action !== KeyAction.RELEASE) this.recordKeyDownData(data);
     }
   }

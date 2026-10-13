@@ -190,6 +190,33 @@ rtest('text.history-row-grapheme-matches-active-row', async (ctx) => {
   await historyVersusActive(ctx, 'e\u0301', 'history-cluster-cell');
 });
 
+rtest('review.wrapped-wide-spacer-refresh-is-read-independent', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 10, rows: 4 });
+  const oracle = await ctx.harness.create({ cols: 10, rows: 4 });
+  const wrap = '\x1b[2;10H\x1b[7m中';
+  const overwrite = '\x1b[3;2Hx';
+  await term.writeAndSettle(wrap); // populate caches before the next-row overwrite
+  await term.writeAndSettle(overwrite);
+  await oracle.writeAndSettle(wrap + overwrite);
+  ctx.checks.equal(
+    'cleared-spacer-width',
+    await ctx.harness.page.evaluate(
+      (id) => window.__ghosttyRegression.bufferCell(id, 1, 9)?.width,
+      term.id
+    ),
+    1
+  );
+  const actual = await term.capture();
+  const expected = await oracle.capture();
+  await expectSameCells(
+    ctx,
+    'read-timing-independent-frame',
+    actual.image,
+    expected.image,
+    actual.grid
+  );
+});
+
 // --- Renderer work model (functional metric, not a timing) ---
 
 rtest('perf.forced-frame-decodes-viewport-once', async (ctx) => {

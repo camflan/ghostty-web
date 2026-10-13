@@ -114,10 +114,9 @@
     },
     {
       "id": "cursor.dectcem-hide-erases-cursor",
-      "required": ["web-candidate"],
-      "gaps": ["web-pinned"],
-      "unsupported": [],
-      "reason": "RT-07 [js-layer]: Hiding the cursor does not dirty its row; incremental frames never redraw it, so the old block stays on screen (a forced full render erases it). (provenance: tests/gaps/browser/history/known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "cursor.dectcem-hide-with-output-on-row",
@@ -732,6 +731,32 @@
       "gaps": ["web-pinned"],
       "unsupported": [],
       "reason": "Legacy has neither native runtime color setters nor render-hold presentation; its construction theme remains unchanged."
+    },
+    {
+      "id": "review.readonly-alternate-wheel-is-silent",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "review.wrapped-wide-spacer-refresh-is-read-independent",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "review.kitty-release-survives-internal-focus",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy retains its pre-native keyboard path: modifier-only report-all keys and paired Kitty releases are not integrated."
+    },
+    {
+      "id": "review.kitty-modifier-reports-preserve-selection",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy retains its pre-native keyboard path: modifier-only report-all keys and paired Kitty releases are not integrated."
     }
   ]
 }

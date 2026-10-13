@@ -109,6 +109,59 @@ rtest('paste.clipboard-native-sanitization-and-mode-transitions', async (ctx) =>
   }
 });
 
+rtest('review.readonly-alternate-wheel-is-silent', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 5 });
+  await term.writeAndSettle('\x1b[?1049h');
+  const point = await term.cellCenter(2, 3);
+  await ctx.harness.page.mouse.move(point.x, point.y);
+  await term.setOptions({ disableStdin: true });
+  await term.clearEvents();
+  await ctx.harness.page.mouse.wheel(0, -99);
+  await ctx.harness.frame();
+  ctx.checks.equal('readonly-wheel', (await term.events()).data, []);
+  await term.setOptions({ disableStdin: false });
+  await ctx.harness.page.mouse.wheel(0, -99);
+  await ctx.harness.page.waitForFunction(
+    (id) => window.__ghosttyRegression.events(id).data.length > 0,
+    term.id
+  );
+  ctx.checks.equal('enabled-wheel', (await term.events()).data, ['\x1b[A', '\x1b[A', '\x1b[A']);
+});
+
+rtest('review.kitty-release-survives-internal-focus', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 5 });
+  await term.writeAndSettle('\x1b[>3u');
+  for (const fromTextarea of [false, true]) {
+    const first = fromTextarea ? 'textarea' : '.host';
+    const second = fromTextarea ? '.host' : 'textarea';
+    await ctx.harness.page.locator(first).evaluate((node) => (node as HTMLElement).focus());
+    await term.clearEvents();
+    await ctx.harness.page.keyboard.down('a');
+    await ctx.harness.page.locator(second).evaluate((node) => (node as HTMLElement).focus());
+    await ctx.harness.page.keyboard.up('a');
+    ctx.checks.equal(
+      `paired-release-${fromTextarea ? 'textarea' : 'container'}`,
+      (await term.events()).data,
+      ['a', '\x1b[97;1:3u']
+    );
+  }
+});
+
+rtest('review.kitty-modifier-reports-preserve-selection', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 20, rows: 5 });
+  await term.writeAndSettle('hello\x1b[>11u');
+  await term.clickCell(2, 2);
+  await term.select(0, 0, 5);
+  await term.clearEvents();
+  await ctx.harness.page.keyboard.down('Shift');
+  await ctx.harness.page.keyboard.up('Shift');
+  ctx.checks.equal('modifier-bytes', (await term.events()).data, [
+    '\x1b[57441;2u',
+    '\x1b[57441;1:3u',
+  ]);
+  ctx.checks.equal('selection-preserved', await term.selection(), 'hello');
+});
+
 rtest('focus.reports-blur-and-focus-when-1004-set', async (ctx) => {
   const term = await ctx.harness.create({ cols: 10, rows: 3 });
   await term.writeAndSettle('\x1b[?1004h');

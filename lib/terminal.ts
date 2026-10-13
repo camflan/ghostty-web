@@ -137,6 +137,7 @@ export class Terminal implements ITerminalCore {
   private hostQueue: Array<NativeHostEvent | typeof FOCUS_REPORT> = [];
   private hostQueueHead = 0;
   private dispatchingHostQueue = false;
+  private resizeDepth = 0;
 
   // Phase 2: Viewport and scrolling state
   public viewportY: number = 0; // Top line of viewport in scrollback buffer (0 = at bottom, can be fractional during smooth scroll)
@@ -305,12 +306,13 @@ export class Terminal implements ITerminalCore {
   }
 
   /** Browser reports use CSS pixels, matching layout and mouse coordinates. */
-  private syncNativeCellSize(): void {
+  private syncNativeCellSize(drainResponses = true): void {
     if (this.wasmTerm?.backend !== 'libghostty-vt' || !this.renderer) return;
     const { width, height } = this.renderer.getMetrics();
     this.wasmTerm.setCellPixelSize(width, height);
-    // Resize reports (mode 2048) are generated outside write(), so drain here too.
-    this.processTerminalResponses();
+    // Resize reports (mode 2048) must wait until the host's onResize listeners
+    // have updated the PTY size; font-only changes can drain immediately.
+    if (drainResponses) this.processTerminalResponses();
   }
 
   /** Parse supported CSS RGB colors; missing/invalid is distinct from explicit black. */
@@ -513,13 +515,14 @@ export class Terminal implements ITerminalCore {
       this.inputHandler = new InputHandler(
         this.ghostty!,
         parent,
-        (data: string) => {
+        (data: string, preserveSelection = false) => {
           // Check if stdin is disabled
           if (this.options.disableStdin) {
             return;
           }
-          // Clear selection when user types
-          this.selectionManager?.clearSelection();
+          // Modifier reports are protocol input, not typed text: keep local
+          // selection available for Shift gestures and copy shortcuts.
+          if (!preserveSelection) this.selectionManager?.clearSelection();
           this.awaitingEcho = true;
           // Input handler fires data events
           this.dataEmitter.fire(data);
@@ -551,7 +554,8 @@ export class Terminal implements ITerminalCore {
           this.awaitingEcho = true;
           this.binaryEmitter.fire(data);
           return true;
-        }
+        },
+        () => !this.options.disableStdin
       );
 
       // Create selection manager (pass textarea for context menu positioning)
@@ -791,34 +795,30 @@ export class Terminal implements ITerminalCore {
     // This avoids the background-tab regression of using an isResizing flag
     // cleared via requestAnimationFrame (rAF is throttled/paused in background tabs).
     this.cancelRenderLoop();
-
+    this.resizeDepth++;
     try {
-      // Update dimensions
+      this.wasmTerm!.resize(cols, rows);
       this.cols = cols;
       this.rows = rows;
-
-      // Resize WASM terminal (may reallocate buffers, invalidating TypedArray views)
-      this.wasmTerm!.resize(cols, rows);
-
-      // Resize renderer
       this.renderer!.resize(cols, rows);
-      this.syncNativeCellSize();
-
-      // renderer.resize() already owns CSS size, device-pixel backing size and
-      // the context transform. Overwriting the backing store here loses DPR.
-
-      // Fire resize event
+      this.syncNativeCellSize(false);
+      // Notify the host before sending in-band size reports. A listener may
+      // synchronously write/resize again; queued replies stay behind this barrier.
       this.resizeEmitter.fire({ cols, rows });
-
-      // Force full render
-      this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
-    } catch (e) {
-      console.error('Terminal resize failed:', e);
+    } finally {
+      this.resizeDepth--;
+      if (!this.isDisposed && this.resizeDepth === 0) {
+        try {
+          this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
+          this.flushWriteQueue();
+        } finally {
+          this.startRenderLoop();
+        }
+      }
     }
-
-    // Flush any writes that were queued during resize, then restart render loop
-    this.flushWriteQueue();
-    this.startRenderLoop();
+    // Listener errors propagate rather than being swallowed as native resize
+    // failures; the host size notification and forced repaint already happened.
+    if (!this.isDisposed && this.resizeDepth === 0) this.processTerminalResponses();
   }
 
   /**
@@ -852,7 +852,7 @@ export class Terminal implements ITerminalCore {
 
     // Host state first, so nothing renders against the pre-reset buffer.
     this.inputHandler?.resetMouseState();
-    this.cancelWheelScroll();
+    this.cancelWheelScroll(false);
     this.selectionManager?.clearSelection();
     if (this.scrollAnimationFrame) {
       cancelAnimationFrame(this.scrollAnimationFrame);
@@ -1071,7 +1071,8 @@ export class Terminal implements ITerminalCore {
    * @param amount Number of lines to scroll (positive = down, negative = up)
    */
   public scrollLines(amount: number): void {
-    this.cancelWheelScroll();
+    const before = this.viewportY;
+    this.cancelWheelScroll(false);
     if (!this.wasmTerm) {
       throw new Error('Terminal not open');
     }
@@ -1087,7 +1088,7 @@ export class Terminal implements ITerminalCore {
     // So we SUBTRACT amount (negative amount becomes positive change)
     const newViewportY = Math.max(0, Math.min(maxScroll, this.viewportY - amount));
 
-    if (newViewportY !== this.viewportY) {
+    if (newViewportY !== before) {
       this.viewportY = newViewportY;
       this.scrollEmitter.fire(this.viewportY);
 
@@ -1110,9 +1111,10 @@ export class Terminal implements ITerminalCore {
    * Scroll viewport to the top of the scrollback buffer
    */
   public scrollToTop(): void {
-    this.cancelWheelScroll();
+    const before = this.viewportY;
+    this.cancelWheelScroll(false);
     const scrollbackLength = this.getScrollbackLength();
-    if (scrollbackLength > 0 && this.viewportY !== scrollbackLength) {
+    if (before !== scrollbackLength) {
       this.viewportY = scrollbackLength;
       this.scrollEmitter.fire(this.viewportY);
       this.showScrollbar();
@@ -1123,8 +1125,9 @@ export class Terminal implements ITerminalCore {
    * Scroll viewport to the bottom (current output)
    */
   public scrollToBottom(): void {
-    this.cancelWheelScroll();
-    if (this.viewportY !== 0) {
+    const before = this.viewportY;
+    this.cancelWheelScroll(false);
+    if (before !== 0) {
       this.viewportY = 0;
       this.scrollEmitter.fire(this.viewportY);
       // Show scrollbar briefly when scrolling to bottom
@@ -1139,11 +1142,12 @@ export class Terminal implements ITerminalCore {
    * @param line Line number (0 = top of scrollback, scrollbackLength = bottom)
    */
   public scrollToLine(line: number): void {
-    this.cancelWheelScroll();
+    const before = this.viewportY;
+    this.cancelWheelScroll(false);
     const scrollbackLength = this.getScrollbackLength();
     const newViewportY = Math.max(0, Math.min(scrollbackLength, line));
 
-    if (newViewportY !== this.viewportY) {
+    if (newViewportY !== before) {
       this.viewportY = newViewportY;
       this.scrollEmitter.fire(this.viewportY);
 
@@ -1155,11 +1159,21 @@ export class Terminal implements ITerminalCore {
   }
 
   /** Explicit navigation supersedes pending wheel input and animation. */
-  private cancelWheelScroll(): void {
+  private cancelWheelScroll(emit = true): void {
     this.wheelRemainder = 0;
     if (this.scrollAnimationFrame !== undefined) {
       cancelAnimationFrame(this.scrollAnimationFrame);
       this.scrollAnimationFrame = undefined;
+      // Wheel destinations are whole rows. Do not strand the view at an
+      // interpolated fractional position when another owner takes over.
+      const target = Math.max(
+        0,
+        Math.min(this.getScrollbackLength(), Math.round(this.targetViewportY))
+      );
+      if (target !== this.viewportY) {
+        this.viewportY = target;
+        if (emit) this.scrollEmitter.fire(target);
+      }
     }
     this.scrollAnimationStartTime = undefined;
     this.scrollAnimationStartY = undefined;
@@ -1861,6 +1875,7 @@ export class Terminal implements ITerminalCore {
 
     if (isAltScreen) {
       this.cancelWheelScroll();
+      if (this.options.disableStdin) return;
       // Alternate screen: send arrow keys to the application
       // Applications like vim handle scrolling internally
       // Standard: ~3 arrow presses per wheel "click"
@@ -2156,7 +2171,7 @@ export class Terminal implements ITerminalCore {
    * buffered data is written all at once during terminal initialization).
    */
   private processTerminalResponses(): void {
-    if (!this.wasmTerm) return;
+    if (!this.wasmTerm || this.resizeDepth > 0) return;
     if (this.wasmTerm.backend === 'libghostty-vt') {
       // Same ordered path as writes, so replies never overtake queued events.
       this.queueNativeHostEvents();
@@ -2191,7 +2206,7 @@ export class Terminal implements ITerminalCore {
    * listener throws, the rest stays queued for the next dispatch.
    */
   private dispatchHostQueue(): void {
-    if (this.dispatchingHostQueue) return;
+    if (this.dispatchingHostQueue || this.resizeDepth > 0) return;
     this.dispatchingHostQueue = true;
     try {
       while (!this.isDisposed && this.hostQueueHead < this.hostQueue.length) {

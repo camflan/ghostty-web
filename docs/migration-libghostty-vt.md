@@ -95,17 +95,16 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including the viewport, runtime-appearance and streaming-
-input follow-ups, was validated on
-**2026-10-13**:
+The required baseline, including the multi-lane integration review fixes, was
+validated on **2026-10-13**:
 
-- **1,075 native-default Bun tests passed**, with no accepted-failure outcomes.
+- **1,100 native-default Bun tests passed**, with no accepted-failure outcomes.
 - Required core: **325 native / 278 legacy passes** (267 / 220 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **116 native / 87 legacy passes**, zero skips, retries or flaky
+- Required browser: **120 native / 90 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
 - Opt-in core gaps: **1 native / 50 legacy failures**. Opt-in browser gaps:
-  **1 native / 30 legacy failures**. Every gap run exited **1**; these are open
+  **1 native / 31 legacy failures**. Every gap run exited **1**; these are open
   defects/parity requirements, not passing regression coverage. Counts across
   lanes overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
@@ -523,6 +522,15 @@ sizes without a font/size-specific exception or changes to the reviewed 15px sce
 Tall combining marks and non-ASCII overflow still use the renderer's existing
 neighbor-band drawing policy; this is not a promise that every Unicode glyph fits
 inside one cell.
+
+## Integration review follow-up
+
+The four-lane review and resulting fixes are recorded in
+[the integration review report](./integration-review.md), including bounded hyperlink
+identity storage, a pinned-upstream spacer-cache workaround, allocation/hold error
+cleanup, key ownership and modifier reporting, read-only wheel input, resize ordering,
+and legacy repaint corrections. The report also records the historical default-color
+query/render mismatch that remains a compatibility decision, not a claimed fix.
 
 ## Remaining API and policy decisions
 
