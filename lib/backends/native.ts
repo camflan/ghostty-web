@@ -49,6 +49,12 @@ const GRAPHEME_CLUSTER_MODE = 2027;
 const SYNC_OUTPUT_MODE = 2026;
 /** Largest chunk handed to one `vt_write` call; the parser state spans chunks. */
 const WRITE_CHUNK = 64 * 1024;
+/**
+ * Hyperlink ids kept beyond the cells that show them (see `pruneLinkIds`): a
+ * screenful of recently read history plus this slack. Bounds the id cache by
+ * the grid instead of by all hyperlinked output ever decoded.
+ */
+const LINK_ID_SLACK = 1024;
 /** `readResponse()` returns at most this many bytes per call, as the legacy engine did. */
 const RESPONSE_CHUNK = 256;
 /**
@@ -412,6 +418,24 @@ function clampMousePx(value: number, cell: number): number {
   return Math.max(-MOUSE_PX_LIMIT, Math.min(value, MOUSE_PX_LIMIT, 65535.5 * cell));
 }
 
+function sameCell(a: GhosttyCell, b: GhosttyCell): boolean {
+  return (
+    a.codepoint === b.codepoint &&
+    a.width === b.width &&
+    a.flags === b.flags &&
+    a.fg_r === b.fg_r &&
+    a.fg_g === b.fg_g &&
+    a.fg_b === b.fg_b &&
+    a.bg_r === b.bg_r &&
+    a.bg_g === b.bg_g &&
+    a.bg_b === b.bg_b &&
+    a.fg_default === b.fg_default &&
+    a.bg_default === b.bg_default &&
+    a.hyperlink_id === b.hyperlink_id &&
+    a.grapheme_len === b.grapheme_len
+  );
+}
+
 function blankCell(): GhosttyCell {
   return {
     codepoint: 0,
@@ -497,7 +521,10 @@ export class NativeTerminal implements TerminalBackend {
   };
 
   // ---- hyperlink identity: URI -> stable nonzero id ----
+  /** URI -> id, least recently used first; bounded by `pruneLinkIds`. */
   private readonly linkIds = new Map<string, number>();
+  /** Ids are never reused, so an evicted URI's old id never names another URI. */
+  private nextLinkId = 0;
 
   // ---- replies queued by WRITE_PTY, in order ----
   private replies: Uint8Array[] = [];
@@ -601,13 +628,10 @@ export class NativeTerminal implements TerminalBackend {
         this.getData('ROWS', out);
         const rows = this.abi.view().getUint16(out, true);
         if (cols !== this.cols || rows !== this.rows) {
-          this.nativeResize(this.cols, this.rows);
+          // Set first: the restore can rethrow a callback error recorded earlier.
           this.decodeAll = true;
+          this.nativeResize(this.cols, this.rows);
         }
-        // In-band DECCOLM resizes through upstream's Terminal.resize, which turns
-        // 2026 off without RENDER_HOLD(false) (even for an unchanged width), so
-        // the restore above sees no hold to end. End such a hold here.
-        if (this.activeHold && !this.getMode(SYNC_OUTPUT_MODE, false)) this.endHold();
       }
     } finally {
       this.backend.writing = false;
@@ -615,13 +639,25 @@ export class NativeTerminal implements TerminalBackend {
       // Any write may change mouse modes (set/reset, RIS, ...); re-read them
       // before the next mouse event. Dedup survives between writes.
       this.mouseModesStale = true;
+      // In-band DECCOLM resizes through upstream's Terminal.resize, which turns
+      // 2026 off without RENDER_HOLD(false) (even for an unchanged width), so
+      // the size restore above sees no hold to end. End such a hold here, also
+      // when a callback error aborted the write.
+      if (this.activeHold) this.endHoldIfSyncOff();
     }
     this.backend.rethrowCallbackError();
   }
 
   resize(cols: number, rows: number): void {
     checkSize(cols, rows);
-    this.nativeResize(cols, rows);
+    try {
+      this.nativeResize(cols, rows);
+    } finally {
+      // A host resize always ends a hold upstream, but reports it only while
+      // native 2026 is on. End it here regardless, before the pool changes
+      // under a held frame (also when the resize threw).
+      this.endHold();
+    }
     this.cols = cols;
     this.rows = rows;
     this.stale = true;
@@ -818,10 +854,20 @@ export class NativeTerminal implements TerminalBackend {
     const ex = abi.exports;
     const L = this.L;
     if (!this.mouseProbe) {
-      this.mouseProbe = abi.newHandle(ex.ghostty_mouse_encoder_new, 'ghostty_mouse_encoder_new');
-      this.mouseProbeEvent = abi.newHandle(ex.ghostty_mouse_event_new, 'ghostty_mouse_event_new');
-      ex.ghostty_mouse_event_set_action(this.mouseProbeEvent, L.mouseAction.PRESS);
-      ex.ghostty_mouse_event_set_button(this.mouseProbeEvent, L.mouseButton.LEFT);
+      // All or nothing: a failed setup frees what it made and is retried next call.
+      const encoder = abi.newHandle(ex.ghostty_mouse_encoder_new, 'ghostty_mouse_encoder_new');
+      let event = 0;
+      try {
+        event = abi.newHandle(ex.ghostty_mouse_event_new, 'ghostty_mouse_event_new');
+        ex.ghostty_mouse_event_set_action(event, L.mouseAction.PRESS);
+        ex.ghostty_mouse_event_set_button(event, L.mouseButton.LEFT);
+      } catch (error) {
+        if (event) ex.ghostty_mouse_event_free(event);
+        ex.ghostty_mouse_encoder_free(encoder);
+        throw error;
+      }
+      this.mouseProbe = encoder;
+      this.mouseProbeEvent = event;
     }
     ex.ghostty_mouse_encoder_setopt_from_terminal(this.mouseProbe, this.handle);
     const s = this.scratch!;
@@ -1452,6 +1498,17 @@ export class NativeTerminal implements TerminalBackend {
     this.heldFrame = null;
   }
 
+  /** End the hold if native 2026 is off; a failing query ends it too (live is the safe side). */
+  private endHoldIfSyncOff(): void {
+    let on = false;
+    try {
+      on = this.getMode(SYNC_OUTPUT_MODE, false);
+    } catch {
+      // Keep the error that is already propagating, if any.
+    }
+    if (!on) this.endHold();
+  }
+
   /**
    * @internal RENDER_HOLD effect. On `held`, nothing after the sequence that
    * began the hold has been parsed yet, even later in the same write, so the
@@ -1813,8 +1870,63 @@ export class NativeTerminal implements TerminalBackend {
     if (y !== this.rows) {
       throw new Error(`libghostty-vt: render state has ${y} rows, terminal has ${this.rows}`);
     }
+    this.refreshSpacerHeads(all);
     this.decodeAll = false;
     this.stale = false;
+  }
+
+  /**
+   * Upstream (246f7028, printCell) turns the spacer head that a wrapped wide
+   * character left in the last cell of row y-1 back into a normal cell when
+   * the character is overwritten on row y, without marking row y-1 dirty, so
+   * the render state's copy of that row stays stale as well. For every row
+   * decoded now (y or y-1) whose previous row still ends in a width-0 cell,
+   * re-read that one cell from the terminal (ACTIVE grid ref, not the render
+   * state) and mark the row dirty if it changed.
+   */
+  private refreshSpacerHeads(all: boolean): void {
+    const x = this.cols - 1;
+    let fresh: GhosttyCell | null = null;
+    for (let y = 1; y < this.rows; y++) {
+      if (!all && !this.rowDirty[y] && !this.rowDirty[y - 1]) continue;
+      const index = (y - 1) * this.cols + x;
+      if (this.pool[index].width !== 0) continue;
+      fresh ??= blankCell();
+      this.decodeActiveCell(x, y - 1, fresh, null);
+      if (sameCell(fresh, this.pool[index])) continue;
+      // A held frame still sharing the row keeps the spacer it captured.
+      if (this.heldFrame && !this.heldFrame.ownRows[y - 1]) {
+        this.preserveHeldRow(this.heldFrame, y - 1);
+      }
+      this.clusters.delete(index);
+      this.decodeActiveCell(x, y - 1, this.pool[index], index);
+      this.rowDirty[y - 1] = 1;
+      if (this.dirty === DirtyState.NONE) this.dirty = DirtyState.PARTIAL;
+    }
+  }
+
+  /** Decode one active-area cell straight from the terminal through grid refs. */
+  private decodeActiveCell(x: number, y: number, cell: GhosttyCell, clusterIndex: number | null) {
+    const ex = this.abi.exports;
+    const s = this.scratch!;
+    const tag = this.L.pointTag.ACTIVE;
+    const source: CellSource = {
+      style: (cx) => {
+        this.gridRef(tag, cx, y);
+        return this.readStyle((ptr) => ex.ghostty_grid_ref_style(s.gridRef, ptr) as number);
+      },
+      graphemes: (cx) => {
+        this.gridRef(tag, cx, y);
+        return this.refGraphemes();
+      },
+      hyperlinkId: (cx) => this.linkId(tag, cx, y),
+    };
+    this.gridRef(tag, x, y);
+    this.abi.check(ex.ghostty_grid_ref_cell(s.gridRef, s.out) as number, 'grid_ref_cell');
+    const view = this.abi.view();
+    const lo = view.getUint32(s.out, true);
+    const hi = view.getUint32(s.out + 4, true);
+    this.decodeCell(lo, hi, x, cell, new Map(), source, clusterIndex);
   }
 
   private decodeRow(y: number): void {
@@ -2121,8 +2233,9 @@ export class NativeTerminal implements TerminalBackend {
   }
 
   /**
-   * Stable nonzero id per URI. The native API exposes no hyperlink identity, so
-   * distinct OSC 8 links sharing a URI (different `id=`) share one id.
+   * Nonzero id per URI, stable while any live, held or recently read cell
+   * shows it. The native API exposes no hyperlink identity, so distinct OSC 8
+   * links sharing a URI (different `id=`) share one id.
    */
   private linkId(tag: number, x: number, y: number): number {
     this.gridRef(tag, x, y);
@@ -2130,10 +2243,37 @@ export class NativeTerminal implements TerminalBackend {
     if (!uri) return 0;
     let id = this.linkIds.get(uri);
     if (id === undefined) {
-      id = this.linkIds.size + 1;
-      this.linkIds.set(uri, id);
-    }
+      if (this.linkIds.size >= 3 * this.cols * this.rows + LINK_ID_SLACK) this.pruneLinkIds();
+      id = ++this.nextLinkId;
+    } else this.linkIds.delete(uri); // re-inserted below as most recently used
+    this.linkIds.set(uri, id);
     return id;
+  }
+
+  /**
+   * Evict the least recently used ids that no live pool cell and no cell of
+   * the held frame shows, keeping a screenful of others (plus slack) for
+   * history rows read recently, so links seen again soon (the renderer re-reads
+   * scrolled history every frame, a wrapped link spans rows) keep their ids.
+   * Each run evicts at least LINK_ID_SLACK / 2 ids, so its O(grid) cost is
+   * amortized over that many new URIs.
+   */
+  private pruneLinkIds(): void {
+    const inUse = new Set<number>();
+    const note = (cells: readonly GhosttyCell[]) => {
+      for (const cell of cells) if (cell.hyperlink_id) inUse.add(cell.hyperlink_id);
+    };
+    note(this.pool);
+    for (const row of this.heldFrame?.ownRows ?? []) if (row) note(row);
+    let unused = 0;
+    for (const id of this.linkIds.values()) if (!inUse.has(id)) unused++;
+    let evict = unused - (this.cols * this.rows + LINK_ID_SLACK / 2);
+    for (const [uri, id] of this.linkIds) {
+      if (evict <= 0) break;
+      if (inUse.has(id)) continue;
+      this.linkIds.delete(uri);
+      evict--;
+    }
   }
 }
 
@@ -2178,8 +2318,9 @@ export class NativeKeyEncoder implements KeyEncoderBackend {
     let utf8Ptr = 0;
     let outPtr = 0;
     let outCap = 64;
-    const lenPtr = abi.alloc(4);
+    let lenPtr = 0;
     try {
+      lenPtr = abi.alloc(4);
       ex.ghostty_key_event_set_action(ev, action);
       ex.ghostty_key_event_set_key(ev, key);
       ex.ghostty_key_event_set_mods(ev, event.mods & 0xffff);
@@ -2220,7 +2361,7 @@ export class NativeKeyEncoder implements KeyEncoderBackend {
       ex.ghostty_key_event_free(ev);
       if (utf8Ptr) abi.free(utf8Ptr, utf8!.length);
       if (outPtr) abi.free(outPtr, outCap);
-      abi.free(lenPtr, 4);
+      if (lenPtr) abi.free(lenPtr, 4);
     }
   }
 

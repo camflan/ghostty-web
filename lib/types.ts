@@ -576,7 +576,7 @@ export interface GhosttyCell {
   bg_b: number; // u8 (background blue)
   flags: number; // u8 (style flags bitfield)
   width: number; // u8 (character width: 1=normal, 2=wide, etc.)
-  hyperlink_id: number; // u16 (0 = no link, >0 = hyperlink ID in set)
+  hyperlink_id: number; // 0 = no link; >0 = link id, equal on cells of the same link (legacy: page-local u16; libghostty-vt: opaque, per URI)
   grapheme_len: number; // u8 (number of extra codepoints beyond first)
   /** Native color presence; absent on the legacy packed-cell ABI. */
   fg_default?: boolean;
