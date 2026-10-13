@@ -116,9 +116,16 @@ export class CanvasRenderer {
   private fontFamily: string;
   private cursorStyle: 'block' | 'underline' | 'bar';
   private cursorBlink: boolean;
+  // Theme of the frame being drawn (all drawing reads this)
   private theme: Required<ITheme>;
-  // Theme set by setTheme() and not yet drawn (see render())
-  private pendingTheme?: ITheme;
+  // Latest theme from setTheme(): live frames use it
+  private liveTheme: Required<ITheme>;
+  // Theme each synchronized-output frame was captured with, pinned when the
+  // theme changes while it is the active presentation (see setTheme)
+  private heldThemes = new WeakMap<IRenderable, Required<ITheme>>();
+  // Buffer last passed to render(), before any held presentation replaced it
+  // (currentBuffer may be a held view); setTheme asks it for the active capture
+  private sourceBuffer?: IRenderable;
   private devicePixelRatio: number;
   private readonly followsWindowDevicePixelRatio: boolean;
   private metrics: FontMetrics;
@@ -184,6 +191,7 @@ export class CanvasRenderer {
     this.cursorStyle = options.cursorStyle ?? 'block';
     this.cursorBlink = options.cursorBlink ?? false;
     this.theme = { ...DEFAULT_THEME, ...options.theme };
+    this.liveTheme = this.theme;
     this.followsWindowDevicePixelRatio = options.devicePixelRatio === undefined;
     this.devicePixelRatio = options.devicePixelRatio ?? window.devicePixelRatio ?? 1;
 
@@ -332,6 +340,7 @@ export class CanvasRenderer {
     // graphemes, cursor and dirty tracking, then comes from it).
     let heldHistory: number | undefined;
     let held = false;
+    this.sourceBuffer = buffer;
     if (buffer.getPresentation && viewportY === 0 && !this.selectionManager?.hasSelection()) {
       const presentation = buffer.getPresentation();
       if (presentation !== buffer) {
@@ -341,10 +350,11 @@ export class CanvasRenderer {
       buffer = presentation;
     }
 
-    // A new theme takes effect with the first live frame, repainting every row.
-    if (this.pendingTheme && !held) {
-      this.applyTheme(this.pendingTheme);
-      this.pendingTheme = undefined;
+    // Live frames use the latest theme; a held frame keeps the theme it was
+    // captured with. Switching between them repaints every row.
+    const frameTheme = (held ? this.heldThemes.get(buffer) : undefined) ?? this.liveTheme;
+    if (frameTheme !== this.theme) {
+      this.theme = frameTheme;
       forceAll = true;
     }
 
@@ -995,36 +1005,37 @@ export class CanvasRenderer {
   // ==========================================================================
 
   /**
-   * Update theme colors
+   * Update theme colors. Live frames use the new theme from the next render.
+   * A synchronized-output frame keeps the theme it was captured with: the
+   * engine colors change together with this call, so a capture taken since
+   * the previous call matches the outgoing live theme and is pinned to it
+   * here (a capture pinned earlier keeps its older theme).
    */
   public setTheme(theme: ITheme): void {
-    // Applied by the next render() that draws live content, which repaints
-    // every row: a synchronized-output frame being presented keeps the colors
-    // it was captured with (see render()).
-    this.pendingTheme = theme ?? {};
-  }
-
-  private applyTheme(theme: ITheme): void {
-    this.theme = { ...DEFAULT_THEME, ...theme };
+    const presentation = this.sourceBuffer?.getPresentation?.();
+    if (presentation && presentation !== this.sourceBuffer && !this.heldThemes.has(presentation)) {
+      this.heldThemes.set(presentation, this.liveTheme);
+    }
+    this.liveTheme = { ...DEFAULT_THEME, ...(theme ?? {}) };
 
     // Rebuild palette
     this.palette = [
-      this.theme.black,
-      this.theme.red,
-      this.theme.green,
-      this.theme.yellow,
-      this.theme.blue,
-      this.theme.magenta,
-      this.theme.cyan,
-      this.theme.white,
-      this.theme.brightBlack,
-      this.theme.brightRed,
-      this.theme.brightGreen,
-      this.theme.brightYellow,
-      this.theme.brightBlue,
-      this.theme.brightMagenta,
-      this.theme.brightCyan,
-      this.theme.brightWhite,
+      this.liveTheme.black,
+      this.liveTheme.red,
+      this.liveTheme.green,
+      this.liveTheme.yellow,
+      this.liveTheme.blue,
+      this.liveTheme.magenta,
+      this.liveTheme.cyan,
+      this.liveTheme.white,
+      this.liveTheme.brightBlack,
+      this.liveTheme.brightRed,
+      this.liveTheme.brightGreen,
+      this.liveTheme.brightYellow,
+      this.liveTheme.brightBlue,
+      this.liveTheme.brightMagenta,
+      this.liveTheme.brightCyan,
+      this.liveTheme.brightWhite,
     ];
   }
 

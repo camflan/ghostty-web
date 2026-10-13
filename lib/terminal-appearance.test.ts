@@ -187,11 +187,60 @@ describe('runtime theme (libghostty-vt)', () => {
     expect(colors(term)).toEqual(colors(constructed));
   });
 
+  // --- Themes and synchronized output (render holds) ---
+
+  /** Every color below differs between the three hold themes. */
+  const HOLD_A: ITheme = { ...THEME_A, cursorAccent: '#a8dadc' };
+  const HOLD_B: ITheme = { ...THEME_B, cursorAccent: '#6d2e46' };
+  const HOLD_C: ITheme = {
+    background: '#0b3d2e',
+    foreground: '#e9c46a',
+    cursor: '#f4a261',
+    cursorAccent: '#264653',
+    red: '#e76f51',
+  };
+  type ThemeKey = 'background' | 'foreground' | 'cursor' | 'cursorAccent' | 'red';
+  const ALL_KEYS: ThemeKey[] = ['background', 'foreground', 'cursor', 'cursorAccent', 'red'];
+  /** Default foreground, palette red and a block cursor on row 0. */
+  const HOLD_CONTENT = 'D\x1b[31mR\x1b[0m';
+
+  /**
+   * Paint one frame like the render loop (incremental unless `force`, at the
+   * current viewport) and return every color filled (rects and text).
+   */
+  function painter(term: Terminal): (force?: boolean) => Set<string> {
+    const ctx = (term.renderer as unknown as { ctx: Record<string, unknown> }).ctx;
+    const seen = new Set<string>();
+    for (const op of ['fillRect', 'fillText']) {
+      const original = ctx[op] as (...args: unknown[]) => unknown;
+      ctx[op] = (...args: unknown[]) => {
+        const style = String(ctx.fillStyle);
+        const rgb = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(style);
+        seen.add(rgb ? hex(Number(rgb[1]), Number(rgb[2]), Number(rgb[3])) : style.toLowerCase());
+        return original.apply(ctx, args);
+      };
+    }
+    return (force = false) => {
+      seen.clear();
+      term.renderer!.render(term.wasmTerm!, force, term.getViewportY(), term, 0);
+      return new Set(seen);
+    };
+  }
+
+  /** Which `keys` a frame painted in `expected`, and which in any `other` theme. */
+  function themeOf(colors: Set<string>, expected: ITheme, others: ITheme[], keys = ALL_KEYS) {
+    const painted = (theme: ITheme) => keys.filter((key) => colors.has(theme[key]!.toLowerCase()));
+    return { shown: painted(expected), leaked: others.flatMap(painted) };
+  }
+
+  const isHeld = (term: Terminal) => term.wasmTerm!.getPresentation() !== term.wasmTerm;
+
   test('a synchronized-output frame keeps its colors until the hold ends', async () => {
-    const term = await terminal(THEME_A);
-    term.write('D\x1b[31mR\x1b[0m');
+    const term = await terminal(HOLD_A);
+    const paint = painter(term);
+    term.write(HOLD_CONTENT);
     term.write('\x1b[?2026h');
-    term.options.theme = THEME_B;
+    term.options.theme = HOLD_B;
     const held = term.wasmTerm!.getPresentation();
     expect(held).not.toBe(term.wasmTerm);
     const heldRow = held.getLine(0)!;
@@ -199,12 +248,73 @@ describe('runtime theme (libghostty-vt)', () => {
     // The live terminal (and the public buffer) already has the new colors.
     const liveRow = line(term, 0);
     expect([fg(liveRow[0]), fg(liveRow[1])]).toEqual([THEME_B.foreground!, THEME_B.red!]);
-    const pending = () => (term.renderer as unknown as { pendingTheme?: ITheme }).pendingTheme;
-    expect(pending()).toBe(THEME_B);
+    // The presented frame, renderer colors included, is entirely the old theme.
+    expect(themeOf(paint(true), HOLD_A, [HOLD_B])).toEqual({ shown: ALL_KEYS, leaked: [] });
     term.write('\x1b[?2026l');
     expect(term.wasmTerm!.getPresentation()).toBe(term.wasmTerm);
-    term.renderer!.render(term.wasmTerm!, false, 0, term, 0);
-    expect(pending()).toBeUndefined();
+    // The first live frame repaints everything with the new theme.
+    expect(themeOf(paint(), HOLD_B, [HOLD_A])).toEqual({ shown: ALL_KEYS, leaked: [] });
+  });
+
+  test('a live history view during a hold uses the new theme; the held frame keeps its own', async () => {
+    const term = await terminal(HOLD_A, { smoothScrollDuration: 0 });
+    const paint = painter(term);
+    for (let i = 0; i < 8; i++) term.write(`line ${i}\r\n`);
+    term.write(HOLD_CONTENT);
+    term.write('\x1b[?2026h'); // captured before the hold was ever painted
+    term.options.theme = HOLD_B;
+    term.scrollLines(-2);
+    expect(term.getViewportY()).toBe(2);
+    // History is drawn live (no cursor; the red cell is off screen).
+    expect(themeOf(paint(), HOLD_B, [HOLD_A], ['background', 'foreground'])).toEqual({
+      shown: ['background', 'foreground'],
+      leaked: [],
+    });
+    term.scrollToBottom();
+    expect(isHeld(term)).toBe(true);
+    expect(themeOf(paint(), HOLD_A, [HOLD_B])).toEqual({ shown: ALL_KEYS, leaked: [] });
+  });
+
+  test('a live selection view during a hold uses the new theme; clearing it restores the held frame', async () => {
+    const term = await terminal(HOLD_A);
+    const paint = painter(term);
+    term.write(HOLD_CONTENT);
+    term.write('\x1b[?2026h');
+    term.options.theme = HOLD_B;
+    term.select(0, 0, 1);
+    expect(themeOf(paint(), HOLD_B, [HOLD_A])).toEqual({ shown: ALL_KEYS, leaked: [] });
+    term.clearSelection();
+    expect(isHeld(term)).toBe(true);
+    expect(themeOf(paint(), HOLD_A, [HOLD_B])).toEqual({ shown: ALL_KEYS, leaked: [] });
+  });
+
+  test('a hold captured after a theme change, before any paint, uses that theme', async () => {
+    const term = await terminal(HOLD_A);
+    const paint = painter(term);
+    term.write(HOLD_CONTENT);
+    term.write('\x1b[?2026h');
+    term.options.theme = HOLD_B;
+    // A new hold begins right away: the engine colors it captures are B's.
+    term.write('\x1b[?2026l\x1b[?2026h');
+    expect(isHeld(term)).toBe(true);
+    expect(fg(term.wasmTerm!.getPresentation().getLine(0)![0])).toBe(THEME_B.foreground!);
+    expect(themeOf(paint(), HOLD_B, [HOLD_A])).toEqual({ shown: ALL_KEYS, leaked: [] });
+  });
+
+  test('several theme changes during one hold: the held frame keeps the capture theme', async () => {
+    const term = await terminal(HOLD_A);
+    const paint = painter(term);
+    term.write(HOLD_CONTENT);
+    term.write('\x1b[?2026h');
+    term.options.theme = HOLD_B;
+    term.select(0, 0, 1); // a live frame in between
+    expect(themeOf(paint(), HOLD_B, [HOLD_A, HOLD_C])).toEqual({ shown: ALL_KEYS, leaked: [] });
+    term.options.theme = HOLD_C;
+    expect(themeOf(paint(), HOLD_C, [HOLD_A, HOLD_B])).toEqual({ shown: ALL_KEYS, leaked: [] });
+    term.clearSelection();
+    expect(themeOf(paint(), HOLD_A, [HOLD_B, HOLD_C])).toEqual({ shown: ALL_KEYS, leaked: [] });
+    term.write('\x1b[?2026l');
+    expect(themeOf(paint(), HOLD_C, [HOLD_A, HOLD_B])).toEqual({ shown: ALL_KEYS, leaked: [] });
   });
 
   test('legacy engines keep their construction theme (no partial repaint)', async () => {
