@@ -336,24 +336,22 @@
     },
     {
       "id": "options.runtime-font-change-keeps-right-edge",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "OPT-01 [js-layer]: handleFontChange calls renderer.render without scrollbarOpacity (defaults to 1), so renderScrollbar clears the right 14 CSS px of every row with the background; rows not redrawn later keep the hole. (provenance: tests/gaps/browser/history/option-known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "options.font-size-13-tall-glyphs-fit-cell",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
-      "unsupported": [],
-      "reason": "OPT-02 [js-layer]: CanvasRenderer.measureFont derives cell height and baseline from the ink box of 'M'; at 13px the dot of j, '|' and '(' extend past the cell and are clipped (15px happens to fit). (provenance: tests/gaps/browser/history/option-known-failures.json)"
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     },
     {
       "id": "options.runtime-theme-applies",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "OPT-03 [js-layer]: Terminal.handleOptionChange('theme') only logs 'theme changes after open() are not yet fully supported'; the renderer and WASM palette keep the constructor theme. (provenance: tests/gaps/browser/history/option-known-failures.json)"
+      "reason": "Legacy-only gap: its construction-fixed colors have no update API; native theme changes use the upstream color setters and update the renderer in place."
     },
     {
       "id": "options.runtime-font-size-matches-fresh-at-2x",
@@ -720,6 +718,20 @@
       "gaps": ["web-pinned"],
       "unsupported": [],
       "reason": "Legacy exposes mode 2026 state but has neither native frame-capture callbacks nor bounded presentation holds."
+    },
+    {
+      "id": "options.runtime-theme-keeps-held-frame-isolated",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy has neither native runtime color setters nor render-hold presentation; its construction theme remains unchanged."
+    },
+    {
+      "id": "options.runtime-theme-follows-a-new-hold-without-live-paint",
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
+      "unsupported": [],
+      "reason": "Legacy has neither native runtime color setters nor render-hold presentation; its construction theme remains unchanged."
     }
   ]
 }

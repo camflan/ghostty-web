@@ -804,18 +804,14 @@ export class Terminal implements ITerminalCore {
       this.renderer!.resize(cols, rows);
       this.syncNativeCellSize();
 
-      // Update canvas dimensions
-      const metrics = this.renderer!.getMetrics();
-      this.canvas!.width = metrics.width * cols;
-      this.canvas!.height = metrics.height * rows;
-      this.canvas!.style.width = `${metrics.width * cols}px`;
-      this.canvas!.style.height = `${metrics.height * rows}px`;
+      // renderer.resize() already owns CSS size, device-pixel backing size and
+      // the context transform. Overwriting the backing store here loses DPR.
 
       // Fire resize event
       this.resizeEmitter.fire({ cols, rows });
 
       // Force full render
-      this.renderer!.render(this.wasmTerm!, true, this.viewportY, this);
+      this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
     } catch (e) {
       console.error('Terminal resize failed:', e);
     }

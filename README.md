@@ -80,6 +80,23 @@ retention guarantee. `scrollback: 0` disables history. Buffer APIs report the ro
 actually retained. Exact xterm-style retention is deferred rather than emulated
 with a hidden JavaScript clamp.
 
+## Runtime appearance and viewport input
+
+On the native backend, assigning `term.options.theme` updates the renderer and
+Ghostty's default colors/palette in place, preserving content, history and active
+terminal state. A synchronized-output frame keeps its capture theme until released;
+live history/selection views use the newest theme. The legacy backend retains its
+construction theme because its ABI has no runtime color setter.
+
+Font changes preserve DPR-scaled canvas sizing and scrollbar state. Local wheel
+input accumulates sub-line deltas and scrolls whole rows; scrollbar drags continue
+outside the canvas. New output still uses the existing jump-to-bottom policy.
+
+String writes can split a UTF-16 surrogate pair across chunks. Empty chunks preserve
+the pending half; a nonempty byte write flushes an unmatched half as U+FFFD before
+the bytes. `disableStdin` suppresses terminal replies as well as host input, without
+replaying suppressed replies when re-enabled.
+
 ## Selection and synchronized output
 
 Native selection text comes from Ghostty's formatter, with complete graphemes,

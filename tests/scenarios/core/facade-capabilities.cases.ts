@@ -20,6 +20,7 @@ describe('facade capabilities', () => {
             () => terminal.setSelectionRange({ x: 0, y: 0 }, { x: 1, y: 0 }),
             () => terminal.getSelectionRange(),
             () => terminal.clearSelection(),
+            () => terminal.setColors(undefined),
             () => terminal.getSelectionText(),
           ];
           const failures = actions.map((action) => {

@@ -424,6 +424,49 @@ rtest('options.font-size-13-tall-glyphs-fit-cell', async (ctx) => {
   );
 });
 
+rtest('options.runtime-theme-keeps-held-frame-isolated', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 12, rows: 3, theme: THEME_A });
+  await term.writeAndSettle('\u2588 \x1b[31m\u2588\x1b[0m\x1b[3;12H');
+  const before = await term.capture();
+  await term.writeAndSettle('\x1b[?2026h');
+  await term.setOptions({ theme: THEME_B });
+  // Selection presents live content while the application hold stays active.
+  await term.select(0, 0, 1);
+  await term.settle();
+  const live = await term.capture();
+  ctx.checks.equal(
+    'selected-view-uses-new-theme',
+    uniformColor(live.image, cellCore(live.grid, 1, 5)),
+    THEME_B.background
+  );
+  await term.clearSelection();
+  await term.settle();
+  ctx.checks.equal('hold-still-active', await term.mode(2026), true);
+  const restored = await term.capture();
+  await expectSameCells(ctx, 'held-theme-restored', restored.image, before.image, restored.grid);
+});
+
+rtest('options.runtime-theme-follows-a-new-hold-without-live-paint', async (ctx) => {
+  const term = await ctx.harness.create({ cols: 12, rows: 3, theme: THEME_A });
+  const oracle = await ctx.harness.create({ cols: 12, rows: 3, theme: THEME_B });
+  const contents = '\u2588 \x1b[31m\u2588\x1b[0m\x1b[3;12H';
+  await term.writeAndSettle(contents);
+  await oracle.writeAndSettle(contents);
+  const expected = await oracle.capture();
+  await term.writeAndSettle('\x1b[?2026h');
+  await term.setOptions({ theme: THEME_B });
+  await term.writeAndSettle('\x1b[?2026l\x1b[?2026h');
+  ctx.checks.equal('new-hold-active', await term.mode(2026), true);
+  const actual = await term.capture();
+  await expectSameCells(
+    ctx,
+    'new-hold-captures-new-theme',
+    actual.image,
+    expected.image,
+    actual.grid
+  );
+});
+
 // --- Runtime theme (desired behaviour; currently only console.warn) -----------------
 
 rtest('options.runtime-theme-applies', async (ctx) => {

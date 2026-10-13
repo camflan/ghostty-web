@@ -42,7 +42,7 @@ describe('static browser catalogue', () => {
       plan,
       declared.map((entry) => entry.id)
     );
-    expect(declared.length).toBe(115);
+    expect(declared.length).toBe(117);
     expect(controls.sort()).toEqual([
       'font.altered-alternate-font-fails-readiness',
       'font.missing-primary-font-fails-readiness',

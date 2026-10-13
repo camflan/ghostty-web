@@ -95,17 +95,17 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including native events, selection anchoring, canvas fixes,
-binary mouse input and synchronized-output presentation, was validated on
+The required baseline, including the viewport, runtime-appearance and streaming-
+input follow-ups, was validated on
 **2026-10-13**:
 
-- **1,037 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **323 native / 276 legacy passes** (265 / 218 behavior cases plus
+- **1,075 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core: **325 native / 278 legacy passes** (267 / 220 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **108 native / 82 legacy passes**, zero skips, retries or flaky
+- Required browser: **116 native / 87 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
-- Opt-in core gaps: **3 native / 52 legacy failures**. Opt-in browser gaps:
-  **7 native / 33 legacy failures**. Every gap run exited **1**; these are open
+- Opt-in core gaps: **1 native / 50 legacy failures**. Opt-in browser gaps:
+  **1 native / 30 legacy failures**. Every gap run exited **1**; these are open
   defects/parity requirements, not passing regression coverage. Counts across
   lanes overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
@@ -494,6 +494,35 @@ respected when a subsequent reply is dispatched.
 The two original core gaps and three browser gaps pass unchanged on both engines.
 This checkpoint passed 1,053 Bun tests, required core 325 native / 278 legacy and
 required browser 111 native / 85 legacy, with no image changes or failure waivers.
+
+## Runtime appearance checkpoint
+
+Native theme assignment now updates Ghostty's default colors and palette in place
+as well as the renderer. Existing buffer text, history, selection, cursor position,
+active SGR and parser state survive. Explicit RGB cells keep their colors; default
+and palette-indexed cells resolve against the new defaults. Missing theme fields
+follow the same policy as construction rather than retaining stale overrides from
+a previous theme. Program-set OSC color overrides remain owned by Ghostty.
+
+Renderer theme ownership follows frame identity: live content uses the latest theme,
+while each synchronized-output snapshot retains the renderer colors it was captured
+with. A weak frame-to-theme mapping handles history/selection views during a hold,
+returning to the held frame, multiple theme changes and release/re-enable without
+an intervening live paint. Unit mutation checks and independent browser images
+caught and then verified the cursor-color leaks that a single deferred theme missed.
+
+The legacy artifact has construction-fixed colors and no equivalent setter, so it
+keeps its construction theme and reports the limitation rather than repainting only
+half the system or recreating the terminal. Its runtime-theme gap stays explicit.
+
+Font changes and subsequent terminal resize leave CSS sizing, device-pixel backing
+size and context scaling to the renderer, and repaint with the current scrollbar
+opacity. Font measurement preserves the existing working cell box, growing it only
+where measured printable-ASCII ink would extend above or below it. This fixes small
+sizes without a font/size-specific exception or changes to the reviewed 15px scenes.
+Tall combining marks and non-ASCII overflow still use the renderer's existing
+neighbor-band drawing policy; this is not a promise that every Unicode glyph fits
+inside one cell.
 
 ## Remaining API and policy decisions
 

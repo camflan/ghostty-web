@@ -1228,5 +1228,13 @@ export class CanvasRenderer {
    */
   public dispose(): void {
     this.stopCursorBlink();
+    // A retained renderer must not retain or query a freed native terminal
+    // through presentation/history views after its owner is disposed.
+    this.currentBuffer = null;
+    this.sourceBuffer = undefined;
+    this.currentHistory = undefined;
+    this.frameLine = undefined;
+    this.selectionManager = undefined;
+    this.heldThemes = new WeakMap();
   }
 }

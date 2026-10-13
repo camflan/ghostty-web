@@ -34,7 +34,11 @@ const THEME_B: ITheme = {
 const open: Terminal[] = [];
 
 afterEach(() => {
-  for (const term of open.splice(0)) term.dispose();
+  for (const term of open.splice(0)) {
+    const container = term.element;
+    term.dispose();
+    container?.remove();
+  }
 });
 
 async function terminal(theme: ITheme | undefined, extra: Record<string, unknown> = {}) {
@@ -317,13 +321,30 @@ describe('runtime theme (libghostty-vt)', () => {
     expect(themeOf(paint(), HOLD_C, [HOLD_A, HOLD_B])).toEqual({ shown: ALL_KEYS, leaked: [] });
   });
 
+  test('a disposed renderer drops its native presentation source', async () => {
+    const term = await terminal(THEME_A);
+    const renderer = term.renderer!;
+    term.write('held\x1b[?2026h');
+    term.options.theme = THEME_B;
+    const container = term.element;
+    term.dispose();
+    container?.remove();
+    expect(() => renderer.setTheme(THEME_A)).not.toThrow();
+  });
+
   test('legacy engines keep their construction theme (no partial repaint)', async () => {
     const term = await terminal(THEME_A);
     const wasm = term.wasmTerm!;
     Object.defineProperty(wasm, 'backend', { value: 'legacy' });
     const calls: unknown[] = [];
     wasm.setColors = (config) => calls.push(config);
-    const renderer = term.renderer as unknown as { pendingTheme?: ITheme };
+    const renderer = term.renderer!;
+    const rendererThemes: ITheme[] = [];
+    const setTheme = renderer.setTheme.bind(renderer);
+    renderer.setTheme = (theme) => {
+      rendererThemes.push(theme);
+      setTheme(theme);
+    };
     const warn = console.warn;
     const warnings: string[] = [];
     console.warn = (message: string) => warnings.push(message);
@@ -333,7 +354,7 @@ describe('runtime theme (libghostty-vt)', () => {
       console.warn = warn;
     }
     expect(calls).toEqual([]);
-    expect(renderer.pendingTheme).toBeUndefined();
+    expect(rendererThemes).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(term.wasmTerm).toBe(wasm);
   });
@@ -388,6 +409,16 @@ describe('runtime font change', () => {
         // The next frames find a consistent canvas: no further resize.
         renderer.render(term.wasmTerm!, false, 0, term, 0.25);
         expect(resizes).toBe(1);
+
+        // A fit/resize after changing the font must keep the same ownership,
+        // rather than silently recreating a CSS-sized backing store at high DPR.
+        term.resize(30, 5);
+        expect([canvas.width, canvas.height]).toEqual([
+          Math.floor(30 * width * dpr),
+          Math.floor(5 * height * dpr),
+        ]);
+        expect(resizes).toBe(2);
+        expect(renders.at(-1)).toBe(0.25);
 
         // The engine reports the new cell size (XTWINOPS 16 t: cell size in pixels).
         const replies: string[] = [];
