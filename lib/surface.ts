@@ -91,7 +91,16 @@ export class Surface {
       else if (command.kind === 'row')
         this.legacyOffset = Math.max(0, Math.min(history, history - command.row));
     }
-    if (!notify) return;
+    if (!notify) {
+      // A compatibility field assignment is silent, not a deferred onScroll.
+      // A nested assignment also supersedes delivery of an obsolete outer value.
+      const offset = this.offset;
+      if (offset !== this.published) {
+        this.published = offset;
+        this.notification++;
+      }
+      return;
+    }
     // Always issue the native command: offset 0 can still be pinned instead of
     // following. Only actual movement is scrollbar activity, not typing or a
     // no-op navigation. Record activity before reentrant public notifications.

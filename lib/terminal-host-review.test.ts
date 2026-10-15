@@ -64,6 +64,19 @@ for (const [name, action] of [
     }));
 }
 
+test('assigning viewportY is silent even across writes; actual history growth still notifies', () =>
+  session((term, opacity) => {
+    history(term);
+    const scrolls: number[] = [];
+    term.onScroll((offset) => scrolls.push(offset));
+    term.viewportY = 7;
+    term.write('X'); // Flushes host effects and polls the native viewport.
+    expect(scrolls).toEqual([]);
+    expect(opacity(150)).toBe(0);
+    term.write('\r\n');
+    expect(scrolls).toEqual([8]);
+  }));
+
 test('no-op input does not extend an existing scrollbar hide deadline', () =>
   session((term, opacity) => {
     history(term);

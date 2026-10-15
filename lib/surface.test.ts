@@ -93,6 +93,40 @@ test('nested scroll delivery supersedes stale outer callbacks', () => {
   expect(late).toEqual([7]);
 });
 
+test('silent offsets remain silent when polled; later native movement still notifies', () => {
+  const f = fixture();
+  const seen: number[] = [];
+  f.events.event((offset) => seen.push(offset));
+  f.surface.setOffset(7, false);
+  f.surface.sync();
+  f.surface.sync();
+  expect(seen).toEqual([]);
+  f.state.total++;
+  f.surface.afterWrite();
+  f.surface.sync();
+  expect(seen).toEqual([8]);
+});
+
+test('a nested silent offset invalidates stale outer notifications without emitting its own', () => {
+  const f = fixture();
+  const late: number[] = [];
+  f.events.event(() => f.surface.setOffset(7, false));
+  f.events.event((offset) => late.push(offset));
+  f.surface.setOffset(3);
+  f.surface.sync();
+  expect(f.surface.offset).toBe(7);
+  expect(late).toEqual([]);
+});
+
+test('a silent no-op does not cancel a current notification', () => {
+  const f = fixture();
+  const late: number[] = [];
+  f.events.event((offset) => f.surface.setOffset(offset, false));
+  f.events.event((offset) => late.push(offset));
+  f.surface.setOffset(3);
+  expect(late).toEqual([3]);
+});
+
 test('disposal during follow-on-input prevents data eligibility and further callbacks', () => {
   const f = fixture();
   f.surface.setOffset(3);
