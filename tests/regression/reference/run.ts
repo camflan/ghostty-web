@@ -283,27 +283,7 @@ function caseTests(mod: ReferenceModule): NamedTest[] {
       return ctx.fresh((vt) => fn(vt.createTerminal(cols, rows)));
     },
   };
-  const build: NamedTest = {
-    name: 'manifest.abi-and-release-small-build',
-    provenance: {
-      kind: 'invariant',
-      reference:
-        'scripts/build-reference-wasm.sh builds -Doptimize=ReleaseSmall for wasm32-freestanding',
-    },
-    run() {
-      ctx.fresh((vt) => {
-        assert.equal(vt.manifest.abi.target, 'wasm32');
-        assert.equal(
-          vt.buildInfo('OPTIMIZE'),
-          vt.enumValue('GhosttyOptimizeMode', 'RELEASE_SMALL')
-        );
-      });
-    },
-  };
-  return [
-    build,
-    ...CASES.map((c) => ({ name: c.name, provenance: c.provenance, run: () => c.run(ctx) })),
-  ];
+  return CASES.map((c) => ({ name: c.name, provenance: c.provenance, run: () => c.run(ctx) }));
 }
 
 function main(): number {

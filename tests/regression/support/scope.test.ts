@@ -20,25 +20,29 @@ describe('required/gap scope contract', () => {
     expect(idsForSuite(plan(), 'web-candidate', 'gaps')).toEqual([]);
   });
 
-  for (const [description, patch] of [
-    ['unknown id', { id: '*' }],
-    ['missing scope', { gaps: [] }],
-    ['overlap', { gaps: ['web-candidate', 'web-pinned'] }],
-    ['duplicate engine', { required: ['web-candidate', 'web-candidate'] }],
-    ['unknown engine', { required: ['reference'] }],
-    ['non-array scopes', { required: 'web-candidate' }],
-    ['no reason for gap', { reason: '' }],
-    ['failure exception embedded in scope', { failure: { actual: 1, expected: 2 } }],
-    ['old candidate allowance', { candidateReview: {} }],
+  for (const [description, patch, message] of [
+    ['unknown id', { id: '*' }, 'literal case id'],
+    ['missing scope', { gaps: [] }, 'every engine must have an explicit scope'],
+    ['overlap', { gaps: ['web-candidate', 'web-pinned'] }, 'multiple scopes'],
+    ['duplicate engine', { required: ['web-candidate', 'web-candidate'] }, 'multiple scopes'],
+    ['unknown engine', { required: ['reference'] }, 'unknown engine'],
+    ['non-array scopes', { required: 'web-candidate' }, 'must be an array'],
+    ['no reason for gap', { reason: '' }, 'gap/unsupported scope needs a reason'],
+    [
+      'failure exception embedded in scope',
+      { failure: { actual: 1, expected: 2 } },
+      'failure exemptions',
+    ],
+    ['old candidate allowance', { candidateReview: {} }, 'failure exemptions'],
   ] as const) {
     test(`rejects ${description}`, () => {
-      expect(() => parseScopePlan({ schema: 1, cases: [{ ...entry, ...patch }] })).toThrow();
+      expect(() => parseScopePlan({ schema: 1, cases: [{ ...entry, ...patch }] })).toThrow(message);
     });
   }
 
   test('rejects malformed plans and duplicate cases', () => {
-    expect(() => parseScopePlan({ schema: 2, cases: [] })).toThrow();
-    expect(() => parseScopePlan([])).toThrow();
+    expect(() => parseScopePlan({ schema: 2, cases: [] })).toThrow('schema: 1');
+    expect(() => parseScopePlan([])).toThrow('schema: 1');
     expect(() => parseScopePlan({ schema: 1, cases: [entry, entry] })).toThrow('Duplicate');
   });
 

@@ -216,8 +216,9 @@ describe('matrix: report parsing', () => {
   const ok = executed('web-candidate', 'both.pass', 'pass');
 
   test('accepts v2 case and scope records', () => {
-    const text = `${line(ok)}\n\n${line(scoped('web-candidate', 'js.bug', 'gap'))}\n`;
-    expect(parseReport(text, 'candidate')).toHaveLength(2);
+    const scope = scoped('web-candidate', 'js.bug', 'gap');
+    const text = `${line(ok)}\n\n${line(scope)}\n`;
+    expect(parseReport(text, 'candidate')).toEqual([ok, scope]);
   });
 
   for (const [what, record] of [

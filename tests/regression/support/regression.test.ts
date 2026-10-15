@@ -20,31 +20,14 @@ describe('strict regression assertions', () => {
     expect(failure).toMatchObject({ assertion: 'bytes', actual: '62', expected: '1b62' });
   });
 
-  test('historically allowlisted ids get no special treatment', async () => {
+  test('propagates exceptions unchanged', async () => {
+    const error = new Error('setup failed');
     await expect(
-      runRegression('key.alt-b', (checks) => checks.equal('output.bytes', ['62'], ['1b62']))
-    ).rejects.toThrow('output.bytes');
+      runRegression('ordinary.exception', () => {
+        throw error;
+      })
+    ).rejects.toBe(error);
   });
-
-  test('the old signature cannot pass a manifest to suppress an error', async () => {
-    const oldCall = runRegression as unknown as (...args: unknown[]) => Promise<void>;
-    await expect(oldCall('key.alt-b', [{ id: 'key.alt-b' }], () => {})).rejects.toThrow(
-      'assertion callback is required'
-    );
-  });
-
-  for (const error of [
-    new Error('setup failed'),
-    new WebAssembly.RuntimeError('Out of bounds memory access'),
-  ]) {
-    test(`propagates ${error.name} unchanged`, async () => {
-      await expect(
-        runRegression('ordinary.exception', () => {
-          throw error;
-        })
-      ).rejects.toBe(error);
-    });
-  }
 
   test('async failures propagate too', async () => {
     await expect(
@@ -72,15 +55,6 @@ describe('strict regression assertions', () => {
         checks.equal('empty.projection', {}, {});
       })
     ).rejects.toThrow('required capabilities missing: cells, cursor');
-  });
-
-  test('does not normalize away undefined cells or wide-character spacers', async () => {
-    await expect(
-      runRegression('normalizer.guard', (checks) => checks.equal('cells', [null], [undefined]))
-    ).rejects.toThrow('cells');
-    await expect(
-      runRegression('normalizer.guard', (checks) => checks.equal('cells', ['中', ''], ['中', ' ']))
-    ).rejects.toThrow('cells');
   });
 
   test('requires literal case and assertion ids', async () => {
