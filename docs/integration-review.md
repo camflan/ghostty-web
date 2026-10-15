@@ -203,3 +203,27 @@ Validation: **1,255 Bun tests**, **134 native / 100 legacy canonical browser che
 **6 package-consumer checks** passed. Formatting, lint, types, native shipping build,
 workflow lint and upstream trace validation passed. Native source/pin/WASM remain
 unchanged. Firefox, WebKit and physical-device parity are not established.
+
+## Host-migration review corrections
+
+Four review lanes found three introduced issues at `7ac2944`; the follow-up fixes:
+
+- Count actual viewport movement as scrollbar activity, not typing or no-op public
+  navigation. Native commands still run, so a pinned last row can resume following
+  even when its numeric offset is already zero. No-op commands neither reveal an
+  expired overlay nor extend its hide deadline.
+- Honor resize suspension when draining legacy replies, matching native effect
+  ordering. Nested suspension retains replies until the outer resize finishes;
+  stdin suppression and disposal still prevent delivery. Legacy raw-bell timing
+  remains unchanged.
+- Treat a hidden scrollbar as one stable visual state. Changes to invisible history
+  metadata no longer force all rows to repaint, while the final hiding frame still
+  repaints to erase the overlay. Native viewport changes continue to invalidate rows.
+
+Seventeen new focused tests and the cross-backend resize-ordering case failed before
+these corrections. Afterward, **1,274 Bun tests**, the required native/legacy core
+matrix, **352 legacy core entry-point checks**, **134 native / 100 legacy canonical
+Chromium checks**, formatting, lint, typecheck, native build and upstream trace checks
+passed. No reviewed image, native source, WASM pin/hash or existing gap scope changed.
+The review also recorded pre-existing issues separately; they are not claimed fixed
+by this batch.

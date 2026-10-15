@@ -1690,6 +1690,12 @@
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
       "unsupported": []
+    },
+    {
+      "id": "lifecycle.resize-defers-listener-replies",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
     }
   ]
 }

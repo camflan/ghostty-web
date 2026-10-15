@@ -423,7 +423,13 @@ export class CanvasRenderer {
 
     // The overlay is host presentation, not native dirty state. Repaint its old
     // pixels when opacity/range changes, including the last frame that hides it.
-    const scrollbarState = `${viewportY}:${scrollbackLength}:${dims.rows}:${scrollbarOpacity}`;
+    // Hidden metadata cannot change pixels. A stable hidden key avoids overriding
+    // native clean rows as output grows pinned history, but still differs from the
+    // last visible key so the final hiding frame erases the old overlay.
+    const scrollbarState =
+      scrollbackProvider && scrollbarOpacity > 0
+        ? `${viewportY}:${scrollbackLength}:${dims.rows}:${scrollbarOpacity}`
+        : 'hidden';
     if (scrollbarState !== this.lastScrollbarState) {
       forceAll = true;
       this.lastScrollbarState = scrollbarState;

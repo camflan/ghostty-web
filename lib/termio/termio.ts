@@ -66,6 +66,9 @@ export class Termio {
       this.dispatch();
       return;
     }
+    // Legacy keeps replies in its native response buffer until resize observers
+    // finish, just as native dispatch keeps copied effects queued while suspended.
+    if (this.suspended) return;
     while (!this.closed && !this.host.disposed()) {
       const response = this.terminal.readResponse();
       if (response === null) break;

@@ -108,3 +108,70 @@ test('reset/clear and disposal stop queued old-state delivery', () => {
   termio.flush();
   expect(seen).toEqual(['one']);
 });
+
+/** Legacy retains its response buffer and raw-bell policy, but shares suspension. */
+function legacyFixture() {
+  const replies: string[] = [];
+  const out: string[] = [];
+  let enabled = true;
+  const terminal = {
+    backend: 'legacy',
+    write: (data: string) => {
+      if (data !== '\x07') replies.push(data);
+    },
+    readResponse: () => replies.shift() ?? null,
+  } as unknown as GhosttyTerminal;
+  const termio = new Termio(terminal, {
+    disposed: () => false,
+    inputEnabled: () => enabled,
+    data: (data) => out.push(data),
+    bell: () => out.push('bell'),
+    title() {},
+    focusReport() {},
+  });
+  return {
+    termio,
+    out,
+    disable: () => {
+      enabled = false;
+    },
+  };
+}
+
+test('legacy response drains honor nested resize suspension without delaying raw bells', () => {
+  const { termio, out } = legacyFixture();
+  termio.suspend();
+  termio.processOutput('first');
+  termio.suspend();
+  termio.processOutput('second');
+  termio.processOutput('\x07');
+  expect(out).toEqual(['bell']);
+  termio.resume();
+  termio.flush();
+  expect(out).toEqual(['bell']);
+  termio.resume();
+  termio.flush();
+  expect(out).toEqual(['bell', 'first', 'second']);
+  termio.flush();
+  expect(out).toEqual(['bell', 'first', 'second']);
+});
+
+test('legacy responses deferred by resize still respect stdin suppression', () => {
+  const { termio, out, disable } = legacyFixture();
+  termio.suspend();
+  termio.processOutput('query');
+  disable();
+  termio.resume();
+  termio.flush();
+  expect(out).toEqual([]);
+});
+
+test('disposing a suspended legacy Termio never delivers the deferred response', () => {
+  const { termio, out } = legacyFixture();
+  termio.suspend();
+  termio.processOutput('query');
+  termio.dispose();
+  termio.resume();
+  termio.flush();
+  expect(out).toEqual([]);
+});

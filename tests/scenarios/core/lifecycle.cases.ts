@@ -25,6 +25,28 @@ import {
 
 const E = '\x1b';
 
+describe('resize effect ordering', () => {
+  regressionCase('lifecycle.resize-defers-listener-replies', (checks) => {
+    return withTerminal({ cols: 10, rows: 2 }, ({ term }) => {
+      const order: string[] = [];
+      term.onResize(() => {
+        order.push('resize#1');
+        term.write(`${E}[6n`);
+        order.push('resize#1 done');
+      });
+      term.onResize(() => order.push('resize#2'));
+      term.onData((data) => order.push(`data:${data}`));
+      term.resize(12, 3);
+      checks.equal('resize-listeners-before-replies', order, [
+        'resize#1',
+        'resize#1 done',
+        'resize#2',
+        `data:${E}[1;1R`,
+      ]);
+    });
+  });
+});
+
 describe('reset and dispose', () => {
   regressionCase('lifecycle.reset-clears-screen', (checks) => {
     // The new handle reuses the freed handle's un-zeroed pages (RT-01 root cause).

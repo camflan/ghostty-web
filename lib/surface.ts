@@ -69,18 +69,16 @@ export class Surface {
     const s = this.snapshot;
     const limit = Math.max(0, s.total - s.len);
     const offset = Number.isFinite(value) ? Math.max(0, Math.min(limit, Math.floor(value))) : 0;
-    this.mouse.pendingScrollY = 0;
-    if (this.native)
-      this.terminal.scrollViewport(
-        offset === 0 ? { kind: 'bottom' } : { kind: 'row', row: limit - offset }
-      );
-    else this.legacyOffset = offset;
-    if (notify) this.sync();
+    this.performBindingAction(
+      offset === 0 ? { kind: 'bottom' } : { kind: 'row', row: limit - offset },
+      notify
+    );
   }
 
   /** Direct native command path, also used by the browser toolkit scrollbar. */
-  performBindingAction(command: NativeScrollCommand): void {
+  performBindingAction(command: NativeScrollCommand, notify = true): void {
     if (this.closed || this.host.disposed()) return;
+    const before = this.offset;
     this.mouse.pendingScrollY = 0;
     if (this.native) this.terminal.scrollViewport(command);
     else {
@@ -93,7 +91,11 @@ export class Surface {
       else if (command.kind === 'row')
         this.legacyOffset = Math.max(0, Math.min(history, history - command.row));
     }
-    this.host.activity();
+    if (!notify) return;
+    // Always issue the native command: offset 0 can still be pinned instead of
+    // following. Only actual movement is scrollbar activity, not typing or a
+    // no-op navigation. Record activity before reentrant public notifications.
+    if (this.offset !== before) this.host.activity();
     this.sync();
     if (!this.closed && !this.host.disposed()) this.host.queueRender();
   }

@@ -1152,7 +1152,6 @@ export class Terminal implements ITerminalCore {
   public scrollToLine(line: number): void {
     // Public compatibility mapping only, never another native viewport owner.
     this.surface?.setOffset(line);
-    this.scrollbar?.noteActivity();
   }
 
   /**
