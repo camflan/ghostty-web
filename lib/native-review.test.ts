@@ -202,6 +202,47 @@ describe('wrapped wide character spacer head', () => {
   });
 });
 
+test('native viewport is restored and resolved after a partially completed write throws', () => {
+  let failWrite = false;
+  const ghostty = new Ghostty(
+    instance((ex) => {
+      const write = ex.ghostty_terminal_vt_write as (t: number, p: number, n: number) => void;
+      ex.ghostty_terminal_vt_write = (t: number, p: number, n: number) => {
+        write(t, p, n);
+        if (failWrite) throw new Error('injected write failure');
+      };
+    })
+  );
+  const term = ghostty.createTerminal(80, 4, { scrollbackLimit: 1000 });
+  try {
+    term.write(Array.from({ length: 30 }, (_, i) => `line ${i}\r\n`).join(''));
+    let offset = 10;
+    failWrite = true;
+    expect(() =>
+      term.writeWithViewport('more\r\n', offset, (next) => {
+        offset = next;
+      })
+    ).toThrow('injected write failure');
+    expect(offset).toBe(11);
+    expect(impl(term).nativeViewport()).toBeNull();
+    expect(
+      term
+        .getLine(0)!
+        .slice(0, 7)
+        .map((cell) => String.fromCodePoint(cell.codepoint))
+        .join('')
+    ).toBe('line 28');
+    failWrite = false;
+    term.writeWithViewport('more\r\n', offset, (next) => {
+      offset = next;
+    });
+    expect(offset).toBe(12);
+    expect(impl(term).nativeViewport()).toBeNull();
+  } finally {
+    term.free();
+  }
+});
+
 describe('allocation failure cleanup', () => {
   test('a failed key-encode allocation frees the key event', () => {
     let failSmallAlloc = false;

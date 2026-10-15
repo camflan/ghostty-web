@@ -235,7 +235,7 @@ export class InputHandler {
   private encoder: KeyEncoder;
   private container: HTMLElement;
   private inputElement?: HTMLElement;
-  private onDataCallback: (data: string, preserveSelection?: boolean) => void;
+  private onDataCallback: (data: string, preserveSelection?: boolean, userInput?: boolean) => void;
   private onBinaryCallback?: (data: string) => boolean;
   private isInputEnabled?: () => boolean;
   private onBellCallback: () => void;
@@ -315,7 +315,7 @@ export class InputHandler {
   constructor(
     ghostty: Ghostty,
     container: HTMLElement,
-    onData: (data: string, preserveSelection?: boolean) => void,
+    onData: (data: string, preserveSelection?: boolean, userInput?: boolean) => void,
     onBell: () => void,
     onKey?: (keyEvent: IKeyEvent) => void,
     customKeyEventHandler?: (event: KeyboardEvent) => boolean,
@@ -752,7 +752,11 @@ export class InputHandler {
     const data = new TextDecoder().decode(encoded);
     if (data && this.isInputEnabled?.() !== false) {
       if (action !== KeyAction.RELEASE) this.forwardedNativeKeys.add(event.code || event.key);
-      this.onDataCallback(data, modifier !== undefined);
+      this.onDataCallback(
+        data,
+        modifier !== undefined,
+        modifier === undefined && action !== KeyAction.RELEASE
+      );
       if (action !== KeyAction.RELEASE) this.recordKeyDownData(data);
     }
   }
@@ -1012,7 +1016,7 @@ export class InputHandler {
       sequence = this.encodeMouseX10(x10Button, col, row, modifiers);
     }
 
-    this.onDataCallback(sequence);
+    this.onDataCallback(sequence, false, false);
   }
 
   /** Reset host gesture ownership and native motion history after blur/reset. */
@@ -1080,7 +1084,8 @@ export class InputHandler {
       const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
       return this.onBinaryCallback?.(binary) ?? false;
     }
-    this.onDataCallback(text);
+    // Pointer reports are not typed input; do not move a history viewport.
+    this.onDataCallback(text, false, false);
     return true;
   }
 

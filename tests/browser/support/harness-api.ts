@@ -201,6 +201,11 @@ export interface HarnessApi {
   openedUrls(): string[];
   selection(id: number): string;
   paste(id: number, text: string): void;
+  clear(id: number): void;
+  /** Reentrant public-API regression: navigate once from the next scroll observer. */
+  navigateOnNextScroll(id: number, line: number): void;
+  /** Reentrant public-API regression: resize once from the next resize observer. */
+  resizeOnNextResize(id: number, cols: number, rows: number): void;
   resize(id: number, cols: number, rows: number): void;
   scrollbackLength(id: number): number;
   mode(id: number, mode: number): boolean;

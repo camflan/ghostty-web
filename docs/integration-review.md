@@ -30,17 +30,19 @@ New deterministic regression tests live in `lib/native-review.test.ts`,
 review cases cover read-only wheel input, internal focus/key releases, modifier
 selection ownership, and read-timing-independent wide-cell presentation.
 
-## Compatibility question left explicit
+## Compatibility question (resolved in the approved policy follow-up)
 
 With omitted theme fields, the historical bridge defaults and canvas defaults are
 not identical: the native default background query reports black, while the canvas
 background is `#1e1e1e`. The behavior predates these fixes. Aligning the color-query
 contract with the painted defaults needs an explicit compatibility choice; this
 review did not silently alter construction defaults or passing color/image oracles.
+The subsequent user-approved change keeps the painted `#1e1e1e` default and makes
+native queries match it; see the migration notes' approved-policy section.
 
-The previously documented inactive-screen/focus C-API limits, jump-on-output
-policy, native selection pruning policy, and legacy runtime-theme limitation are
-also unchanged. They are not counted as fixed findings.
+The previously documented inactive-screen/focus C-API limits, native selection
+pruning policy, and legacy runtime-theme limitation remain unchanged. The separate
+approved output-policy follow-up now preserves viewed history on native.
 
 ## Validation
 
@@ -91,3 +93,92 @@ required browser 122 native / 92 legacy; 157 reference and six package checks;
 formatting, lint, typecheck and the pinned build. The explicit gaps remain one
 native core and one native browser case (50 / 31 on legacy), all exiting 1.
 The bounded real-PTY Vim/tmux smoke also passed again after these corrections.
+
+## Correctness review round 3 and fixes
+
+All four fresh reviewers returned final structured reports for `bd299d2` plus the
+approved policy diff. Native and rendering marked their coverage partial; input/
+lifecycle and API/contracts completed their bounded scopes. Eleven reviewer entries
+consolidated into eight findings. Fresh baseline checks were green before the fixes,
+so these were missing boundary assertions rather than accepted failures.
+
+All eight findings are now addressed:
+
+- User typing/paste resumes following before delivery; protocol replies, modifier/
+  release reports, and application pointer reports do not move history.
+- The pinned native viewport API now owns clear/reset/prune/per-screen tracking
+  during writes. Live snapshots isolate it at the bottom, including mid-write holds.
+  This fixes split-versus-combined behavior without native patches or a JS parser.
+- Fractional wheel remainder survives interleaved writes, including empty writes.
+- Public normal-buffer base/viewport coordinates reflect retained history.
+- Resize clamps host and pending viewport positions before notifying observers.
+- Throwing data/bell/title listeners cannot lose anchored scroll notifications;
+  nested navigation is not notified twice and the first observer error is retained.
+- Opaque named/RGBA/HSL CSS colors are resolved before native color configuration,
+  verified against actual browser pixels at construction and after theme changes.
+- The original legacy jump-on-output assertion is restored as required coverage;
+  the separate native preservation policy and shared bottom-follow checks remain.
+
+Twelve new scrolling/observer assertions were observed failing before their fixes,
+and the public-buffer offset reproducer failed before the getters changed. Additional
+controls cover disabled/filtered input, modifier and key-release reports, app mouse
+reports, large post-clear output, alternate-screen chunking, and native write errors.
+No reviewed image or unresolved-gap assertion was weakened. See the migration notes
+for current validation totals and the still-unmodified native pin/API limitations.
+
+## Round 4: selected functional fixes
+
+The subsequent review identified two functional bugs and two coordinate API/doc
+items. Only the functional findings were selected for this follow-up:
+
+- Smooth scrolling now has explicit animation ownership. Cancelling from a scroll
+  observer invalidates the old owner before notifying anyone, including the first
+  synchronous step before a frame id exists. Completed frames clear their state
+  before final notification; stale callbacks cannot overwrite a replacement or
+  rearm after disposal. Explicit navigation synchronizes the pending destination.
+- Native `clear()` now uses the anchored host-write path. ED2 at an OSC 133 prompt
+  can move active rows into history; the viewed content and scroll notification
+  now match writing the same ED2/CUP bytes. Legacy clear behavior is unchanged.
+
+Thirteen unit regressions cover first/scheduled/final-frame reentrancy, replacement,
+throwing observers, disposal, and semantic-prompt clear (including held presentation).
+Nine new assertions were observed failing before the implementation; controls and
+later boundary cases also pass. Two required browser cases verify responsive wheel
+navigation on both engines and native clear's painted history rows/notification.
+
+Validation: **1,158 Bun tests**, **130 native / 97 legacy canonical browser checks**,
+zero skips/flaky results and unchanged reviewed images. The coordinate getter docs
+and the existing bottom-relative navigation/event convention were deliberately not
+changed by these two fixes. No upstream source, patch, or WASM change was needed.
+
+## Round 5: drag continuity, duration and lifecycle fixes
+
+The four bounded reviewers found five additional issues, not regressions in the
+round-4 animation ownership or native-clear fixes. All five are now addressed:
+
+- Thumb movement is measured incrementally in client coordinates against the live
+  viewport and current track geometry, not a stale mousedown offset. Fractional
+  pointer movement survives interleaved writes; zero vertical movement keeps the
+  resolved anchor after output, pruning, clear/reset, or resize. Boundary overscroll
+  does not leave debt, and a zero-travel track cannot produce invalid coordinates.
+- Thumb takeover settles wheel intent before recording movement, preserving whole-
+  row viewport and scroll-event values. A held thumb cancels a prior hide timer.
+- Smooth scrolling uses monotonic elapsed time and cubic ease-out. The configured
+  duration scales correctly at 30/60/144 Hz; retargeting and runtime duration changes
+  start from the displayed position. Existing generation ownership and instant
+  behavior for invalid or <= 1000/60 ms durations remain intact.
+- A superseding resize still emits the current viewport change if no nested operation
+  delivered it. Dimension-event generation guards remain; the original observer error
+  is preserved and already-delivered scroll changes are not duplicated.
+- Scrollbar show/hide/fade scheduling and callbacks stop at disposal, so navigation
+  observers cannot resurrect timers after teardown. Drag state is cleared as well.
+
+Twenty-three new unit cases cover these fixes and controls; seventeen failed before
+implementation. Timing tests advance a virtual monotonic clock (they are correctness
+checks, not responsiveness benchmarks). Three browser cases verify output during a
+real thumb drag, whole-row wheel takeover, and nested-resize notification delivery.
+
+Validation: **1,181 Bun tests**, **133 native / 99 legacy canonical browser checks**,
+with zero skips/flaky results and unchanged reviewed images. Public coordinate
+conventions and the separately deferred coordinate-documentation findings remain
+unchanged. No upstream source, patch, or WASM changes were required.

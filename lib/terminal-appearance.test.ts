@@ -90,6 +90,59 @@ function probe(term: Terminal) {
   };
 }
 
+describe('default background queries', () => {
+  async function backgroundReply(term: Terminal) {
+    let reply = '';
+    const listener = term.onData((data) => {
+      reply += data;
+    });
+    try {
+      term.write('\x1b]11;?\x1b\\');
+      return reply;
+    } finally {
+      listener.dispose();
+    }
+  }
+
+  test('omitted and partial themes report the existing dark-gray canvas default', async () => {
+    for (const theme of [undefined, {}, { foreground: '#123456' }]) {
+      const term = await terminal(theme);
+      expect(await backgroundReply(term)).toBe('\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\');
+      expect(colors(term).background).toBe('#1e1e1e');
+    }
+  });
+
+  test('explicit black and custom backgrounds still report their configured colors', async () => {
+    for (const [background, expected] of [
+      ['#000000', '0000/0000/0000'],
+      ['#123456', '1212/3434/5656'],
+    ]) {
+      const term = await terminal({ background });
+      expect(await backgroundReply(term)).toBe(`\x1b]11;rgb:${expected}\x1b\\`);
+      expect(colors(term).background).toBe(background);
+    }
+  });
+
+  test('removing a runtime background restores the canvas default, including after reset', async () => {
+    const term = await terminal(THEME_A);
+    for (const theme of [{ foreground: '#123456' }, undefined]) {
+      term.options.theme = theme;
+      expect(await backgroundReply(term)).toBe('\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\');
+      term.reset();
+      expect(await backgroundReply(term)).toBe('\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\');
+    }
+  });
+
+  test('program background overrides survive a theme change and OSC 111 restores the default', async () => {
+    const term = await terminal(undefined);
+    term.write('\x1b]11;rgb:12/34/56\x1b\\');
+    term.options.theme = { foreground: '#123456' };
+    expect(await backgroundReply(term)).toBe('\x1b]11;rgb:1212/3434/5656\x1b\\');
+    term.write('\x1b]111\x1b\\');
+    expect(await backgroundReply(term)).toBe('\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\');
+  });
+});
+
 describe('runtime theme (libghostty-vt)', () => {
   test('recolors default and palette cells in place and keeps everything else', async () => {
     const term = await terminal(THEME_A);

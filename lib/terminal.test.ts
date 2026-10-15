@@ -1345,7 +1345,7 @@ describe('Buffer Access API', () => {
 
     term.open(container!);
 
-    // Write to main screen (default background = black)
+    // Write to main screen (default background = #1e1e1e)
     term.write('MAIN\r\n');
     term.wasmTerm?.update();
     term.wasmTerm?.markClean();
@@ -1372,14 +1372,14 @@ describe('Buffer Access API', () => {
     term.write('\x1b[?1049l');
     term.wasmTerm?.update();
 
-    // CRITICAL: Background colors must be restored to main screen values (black)
+    // Background colors must be restored to the main screen's canvas default.
     const restoredViewport = term.wasmTerm?.getViewport();
     const firstCell = restoredViewport![0];
 
-    // Main screen cells should have default background (0, 0, 0 = black)
-    expect(firstCell.bg_r).toBe(0);
-    expect(firstCell.bg_g).toBe(0);
-    expect(firstCell.bg_b).toBe(0);
+    // The native default now agrees with the existing dark-gray canvas (#1e1e1e).
+    expect(firstCell.bg_r).toBe(0x1e);
+    expect(firstCell.bg_g).toBe(0x1e);
+    expect(firstCell.bg_b).toBe(0x1e);
 
     // Verify text is also restored
     expect(String.fromCodePoint(firstCell.codepoint)).toBe('M');

@@ -36,6 +36,7 @@ const REQUIRED_EXPORTS = {
   ghostty_terminal_paste: 3,
   ghostty_focus_encode: 4,
   ghostty_terminal_grid_ref: 3,
+  ghostty_terminal_scroll_viewport: 2,
   ghostty_grid_ref_cell: 2,
   ghostty_grid_ref_row: 2,
   ghostty_grid_ref_style: 2,
@@ -323,6 +324,8 @@ function resolveLayout(r: Resolver) {
       'ACTIVE_SCREEN',
       'MOUSE_TRACKING',
       'SCROLLBACK_ROWS',
+      'SCROLLBAR',
+      'VIEWPORT_ACTIVE',
       'MODE',
       'COLOR_PALETTE_DEFAULT',
       'KITTY_KEYBOARD_FLAGS',
@@ -330,6 +333,16 @@ function resolveLayout(r: Resolver) {
       'SELECTION',
     ] as const),
     screen: r.enums('GhosttyTerminalScreen', ['PRIMARY', 'ALTERNATE'] as const),
+    scrollViewport: {
+      size: r.size('GhosttyTerminalScrollViewport'),
+      ...r.struct('GhosttyTerminalScrollViewport', { tag: 4, value: 16 }),
+      ...r.struct('GhosttyTerminalScrollViewportValue', { row: 4 }),
+    },
+    scrollViewportTag: r.enums('GhosttyTerminalScrollViewportTag', ['BOTTOM', 'ROW'] as const),
+    scrollbar: {
+      size: r.size('GhosttyTerminalScrollbar'),
+      ...r.struct('GhosttyTerminalScrollbar', { total: 8, offset: 8, len: 8 }),
+    },
     terminalCursorStyle: r.enums('GhosttyTerminalCursorStyle', [
       'BAR',
       'BLOCK',

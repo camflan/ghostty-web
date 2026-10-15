@@ -86,11 +86,27 @@ On the native backend, assigning `term.options.theme` updates the renderer and
 Ghostty's default colors/palette in place, preserving content, history and active
 terminal state. A synchronized-output frame keeps its capture theme until released;
 live history/selection views use the newest theme. The legacy backend retains its
-construction theme because its ABI has no runtime color setter.
+construction theme because its ABI has no runtime color setter. Omitted backgrounds
+use the existing `#1e1e1e` canvas default for native OSC 11 queries too; explicit
+backgrounds and program color overrides retain their normal behavior. Opaque named
+CSS colors and forms such as `rgba(..., 1)` and `hsl(...)` are resolved by the browser
+before configuring native colors, so their queries match the painted colors too.
 
 Font changes preserve DPR-scaled canvas sizing and scrollbar state. Local wheel
 input accumulates sub-line deltas and scrolls whole rows; scrollbar drags continue
-outside the canvas. New output still uses the existing jump-to-bottom policy.
+outside the canvas. On the native backend, new output preserves the content you
+are reading while scrolled back, including through history pruning. If that content
+is discarded, the view clamps to the oldest retained row. At the bottom, the view
+continues to follow new output. Typing, pasting, or `input(data, true)` resumes
+following before the input is sent; modifier/release and pointer reports do not.
+`scrollToBottom()` also resumes following explicitly. Fractional wheel input survives
+interleaved output. Thumb dragging also preserves the current reading anchor across
+output, pruning and resize; taking the thumb settles pending wheel input to whole
+rows. Smooth scrolling uses elapsed-time easing, with the configured duration
+independent of frame rate (the existing instant behavior for durations at or below
+`1000 / 60` ms is retained). Ghostty owns reset/clear and per-screen reading positions, so
+splitting a stream into different writes cannot change those decisions. The archived
+legacy backend retains its jump-to-bottom policy.
 
 String writes can split a UTF-16 surrogate pair across chunks. Empty chunks preserve
 the pending half; a nonempty byte write flushes an unmatched half as U+FFFD before

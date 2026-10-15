@@ -11,14 +11,15 @@ function config(theme: ITheme = {}): GhosttyTerminalConfig {
 }
 
 describe('native color configuration presence', () => {
-  test('absent theme entries retain native defaults instead of becoming black', () => {
+  test('absent background uses the canvas default while other missing entries keep native defaults', () => {
     expect(config().colorPresence).toEqual({
       foreground: false,
-      background: false,
+      background: true,
       cursor: false,
       palette: 0,
     });
     expect(config().fgColor).toBeUndefined();
+    expect(config().bgColor).toBe(0x1e1e1e);
   });
 
   test('explicit black is distinguished from missing defaults', () => {

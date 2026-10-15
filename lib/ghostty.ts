@@ -360,6 +360,17 @@ export class GhosttyTerminal {
     this.noteRenderHold();
   }
 
+  /** @internal Native host write preserving the viewed content across parsing. */
+  writeWithViewport(
+    data: string | Uint8Array,
+    offset: number,
+    update: (offset: number) => void
+  ): void {
+    this.assertLive();
+    if (!this.impl.preserveViewport) throw nativeOnly(this.kind, 'writeWithViewport');
+    this.impl.preserveViewport(offset, () => this.write(data), update);
+  }
+
   resize(cols: number, rows: number): void {
     this.assertLive();
     if (cols === this._cols && rows === this._rows) return;

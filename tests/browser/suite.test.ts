@@ -42,7 +42,7 @@ describe('static browser catalogue', () => {
       plan,
       declared.map((entry) => entry.id)
     );
-    expect(declared.length).toBe(123);
+    expect(declared.length).toBe(134);
     expect(controls.sort()).toEqual([
       'font.altered-alternate-font-fails-readiness',
       'font.missing-primary-font-fails-readiness',
@@ -139,6 +139,9 @@ function list(config: string, env: Record<string, string>): Promise<Listed> {
         '-c',
         config,
         '--list',
+        // The last native browser gap was promoted. Only listing may be empty;
+        // exact manifest ids are still checked below (required runs stay strict).
+        '--pass-with-no-tests',
         '--reporter=json',
       ],
       { cwd: repo, env: { ...process.env, GHOSTTY_REQUIRED_CI: '', ...env } }

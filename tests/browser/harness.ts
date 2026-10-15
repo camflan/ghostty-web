@@ -398,6 +398,26 @@ const api: HarnessApi = {
     get(id).term.paste(text);
   },
 
+  clear(id) {
+    get(id).term.clear();
+  },
+
+  navigateOnNextScroll(id, line) {
+    const term = get(id).term;
+    const listener = term.onScroll(() => {
+      listener.dispose();
+      term.scrollToLine(line);
+    });
+  },
+
+  resizeOnNextResize(id, cols, rows) {
+    const term = get(id).term;
+    const listener = term.onResize(() => {
+      listener.dispose();
+      term.resize(cols, rows);
+    });
+  },
+
   resize(id, cols, rows) {
     get(id).term.resize(cols, rows);
   },

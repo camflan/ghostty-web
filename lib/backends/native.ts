@@ -13,8 +13,8 @@
  *
  * History rows, wrap flags, graphemes and hyperlink URIs outside the decoded
  * viewport are read on demand through grid references (requires a build with
- * the default `grid_introspection` feature) and never move the native viewport,
- * which stays on the active area; ghostty-web keeps its own JS scroll position.
+ * the default `grid_introspection` feature). Host writes temporarily use native
+ * viewport tracking; render-state snapshots always read the live active area.
  */
 import {
   CellFlags,
@@ -315,6 +315,8 @@ class Scratch {
   readonly title: number;
   readonly selection: number;
   readonly selectionFormat: number;
+  readonly scrollViewport: number;
+  readonly scrollbar: number;
 
   constructor(abi: NativeAbi) {
     const L = abi.layout;
@@ -344,6 +346,8 @@ class Scratch {
       title: take(L.string.size),
       selection: take(L.selection.size),
       selectionFormat: take(L.selectionFormat.size),
+      scrollViewport: take(L.scrollViewport.size),
+      scrollbar: take(L.scrollbar.size),
     };
     this.size = offset;
     this.base = abi.alloc(offset);
@@ -366,6 +370,8 @@ class Scratch {
     this.title = this.base + rel.title;
     this.selection = this.base + rel.selection;
     this.selectionFormat = this.base + rel.selectionFormat;
+    this.scrollViewport = this.base + rel.scrollViewport;
+    this.scrollbar = this.base + rel.scrollbar;
   }
 }
 
@@ -1306,6 +1312,60 @@ export class NativeTerminal implements TerminalBackend {
   // History and on-demand cell data (grid references; never moves the viewport)
   // ==========================================================================
 
+  /**
+   * Let upstream own the reading anchor while parsing: it distinguishes reset
+   * and ED3 from budget pruning at the exact byte that performs them. Tracked
+   * grid refs alone cannot do that after a clear followed by heavy output.
+   * The primary viewport can remain pinned while the alternate screen is active;
+   * read it back on every write so split and combined screen switches agree.
+   */
+  preserveViewport(offset: number, write: () => void, update: (offset: number) => void): void {
+    if (!this.isAlternateScreen()) {
+      const history = this.getScrollbackLength();
+      offset = Math.max(0, Math.min(history, Math.floor(offset)));
+      this.scrollNativeViewport(offset > 0 ? history - offset : null);
+    }
+    try {
+      write();
+    } finally {
+      try {
+        update(this.isAlternateScreen() ? 0 : (this.nativeViewport()?.offset ?? 0));
+      } finally {
+        // Public/live render snapshots must never accidentally show history.
+        this.scrollNativeViewport(null);
+      }
+    }
+  }
+
+  /** Native viewport state, in absolute screen rows and offset from the bottom. */
+  private nativeViewport(): { row: number; offset: number } | null {
+    const s = this.scratch!;
+    this.getData('VIEWPORT_ACTIVE', s.out);
+    if (this.abi.bytes()[s.out]) return null;
+    this.getData('SCROLLBAR', s.scrollbar);
+    const S = this.L.scrollbar;
+    const view = this.abi.view();
+    const total = view.getBigUint64(s.scrollbar + S.total, true);
+    const row = view.getBigUint64(s.scrollbar + S.offset, true);
+    const len = view.getBigUint64(s.scrollbar + S.len, true);
+    return { row: Number(row), offset: Math.max(0, Number(total - len - row)) };
+  }
+
+  /** `null` follows the live screen; otherwise pin an absolute screen row. */
+  private scrollNativeViewport(row: number | null): void {
+    const ptr = this.scratch!.scrollViewport;
+    const S = this.L.scrollViewport;
+    this.abi.bytes().fill(0, ptr, ptr + S.size);
+    const view = this.abi.view();
+    view.setInt32(
+      ptr + S.tag,
+      row === null ? this.L.scrollViewportTag.BOTTOM : this.L.scrollViewportTag.ROW,
+      true
+    );
+    if (row !== null) view.setUint32(ptr + S.value + S.row, row, true);
+    this.abi.exports.ghostty_terminal_scroll_viewport(this.handle, ptr);
+  }
+
   getScrollbackLength(): number {
     const s = this.scratch!;
     this.getData('SCROLLBACK_ROWS', s.out);
@@ -1798,6 +1858,20 @@ export class NativeTerminal implements TerminalBackend {
   }
 
   private refresh(): void {
+    // RENDER_HOLD can call this inside vt_write while native viewport tracking
+    // is pinned in history. Capture live rows/cursor instead, then restore the
+    // exact reading anchor before parsing resumes. This also protects direct
+    // low-level reads after a primary/alternate screen switch.
+    const viewport = this.nativeViewport();
+    if (viewport) this.scrollNativeViewport(null);
+    try {
+      this.refreshActive();
+    } finally {
+      if (viewport) this.scrollNativeViewport(viewport.row);
+    }
+  }
+
+  private refreshActive(): void {
     const abi = this.abi;
     const ex = abi.exports;
     const L = this.L;

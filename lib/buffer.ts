@@ -136,15 +136,18 @@ export class Buffer implements IBuffer {
   }
 
   get viewportY(): number {
-    // Get viewport offset from Terminal
-    // For now, return 0 (no scrollback navigation implemented yet)
-    return 0;
+    if (this.bufferType === 'alternate') return 0;
+    // Public buffer coordinates count from oldest history, while Terminal's
+    // internal viewport offset counts upward from the live screen. Match the
+    // renderer's whole-row mapping during fractional smooth scrolling.
+    const base = this.baseY;
+    return Math.max(0, Math.min(base, base - Math.floor(this.terminal.getViewportY())));
   }
 
   get baseY(): number {
-    // For normal buffer: 0
-    // For alternate buffer: 0 (alternate has no scrollback)
-    return 0;
+    // The active screen starts immediately after the retained history. General
+    // inactive-screen access remains limited by the underlying native API.
+    return this.bufferType === 'alternate' ? 0 : (this.getWasmTerm()?.getScrollbackLength() ?? 0);
   }
 
   get length(): number {

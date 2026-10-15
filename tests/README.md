@@ -19,22 +19,22 @@ bug reproducers**. Existing bugs and future-parity requirements are in a separat
 explicitly selected [gap suite](gaps/README.md). A gap failure is a real failure,
 not a passing test.
 
-Validated on 2026-10-13, including both integration review rounds after
+Validated on 2026-10-14, including the selected round-3/4/5 correctness fixes after
 the earlier native integration and host-side checkpoints:
 
 | Lane                                             | Native (`web-candidate`) | Legacy (`web-pinned`) |
 | ------------------------------------------------ | ------------------------ | --------------------- |
-| Required core behavior                           | 267 passed               | 220 passed            |
+| Required core behavior                           | 269 passed               | 222 passed            |
 | Core controls and harness checks                 | 58 passed                | 58 passed             |
-| Required browser behavior                        | 116 passed               | 86 passed             |
+| Required browser behavior                        | 127 passed               | 93 passed             |
 | Browser controls                                 | 6 passed                 | 6 passed              |
 | Opt-in core gaps                                 | 1 failed, exit 1         | 50 failed, exit 1     |
-| Opt-in browser gaps                              | 1 failed, exit 1         | 31 failed, exit 1     |
+| Opt-in browser gaps                              | 0 cases                  | 31 failing cases      |
 | Unsupported core ABI cases (metadata, not tests) | 3                        | 1                     |
 
-The full default `bun test` run passes **1,109 tests**, including the native core
+The full default `bun test` run passes **1,181 tests**, including the native core
 lane above, existing public-library tests and harness/policy checks. Browser runs
-use the canonical container: **122 native / 92 legacy passes**, zero skips, retries
+use the canonical container: **133 native / 99 legacy passes**, zero skips, retries
 or flaky results. All eight reviewed scene images remain unchanged. Core matrix
 reports list gaps and unsupported ABI scope separately from executed pass/fail
 counts; no required cases are missing.
@@ -54,8 +54,8 @@ on native. Application-drag selection suppression passes on both engines; the ne
 Shift-local selection case reproduces a legacy-only gap. The paste/focus slices add
 26 bridge/host unit tests and two browser cases, promoting six core and two browser
 gaps unchanged on native. The OSC 8 safety fix adds 49 provider tests and promotes
-its browser gap on both engines. The current catalogues contain 271 core and 123
-browser declarations (117 browser behavior cases plus 6 controls). No existing
+its browser gap on both engines. The current catalogues contain 273 core and 134
+browser declarations (128 browser behavior cases plus 6 controls). No existing
 required case was demoted.
 
 The subsequent event/buffer, native-selection, canvas, binary-input and synchronized-
@@ -74,20 +74,37 @@ on legacy; its runtime theme ABI limitation remains). Boundary tests cover strea
 surrogates, disabled-stdin replies, fractional scrolling, outside-canvas drags,
 DPR/font changes and per-frame theme ownership. Two new native-required browser
 cases reproduce theme/render-hold interactions against independent images; the
-legacy failures remain explicit. The only native catalogue gaps left are inactive-
-normal-screen reads and the unchanged scroll-on-output policy.
+legacy failures remain explicit. At that checkpoint, the remaining native catalogue
+gaps were inactive-normal-screen reads and the undecided scroll-on-output policy.
 
 The integration review added 25 unit tests and four browser cases for cache/lifetime,
 wide-cell invalidation, key ownership, read-only input and resize ordering. Legacy
 cursor-hide coverage was promoted unchanged; two new keyboard cases remain explicit
 legacy gaps. See [the review report](../docs/integration-review.md) for findings,
-reproduction strategy and the remaining compatibility question.
+reproduction strategy and the compatibility question resolved by the policy follow-up.
 
 All four fresh reviewers completed the follow-up round. Their findings added nine
 unit cases and two browser cases for resize reentrancy/error recovery, short scroll
 durations, explicit navigation, runtime cursor/selection repaint and hyperlink IDs
 across a shrinking resize. Eight new assertions were observed failing before the
 fixes; no existing oracle, reviewed image or required scope was weakened.
+
+The approved policy follow-up promotes the original native history-preservation
+assertion unchanged. Bottom-follow coverage complements the original legacy-required
+jump-on-output characterization; old native unit expectations for output scrolling and default
+background are updated to the explicitly approved behavior. A new browser probe
+compares OSC 11 reply bytes with default canvas pixels. This new protocol probe is
+unsupported on the archived legacy ABI: its color-operation handler is a no-op.
+Legacy's existing required cases are unchanged, and its history-preservation gap
+remains explicit. No WASM patch or reviewed image changed.
+
+Round 3 adds 19 host regression cases and two cross-engine core cases for user-input
+following, wheel remainder, reset/ED3 chunk boundaries (including over-budget output),
+per-screen reading restoration, held-frame isolation, resize bounds, buffer offsets,
+and throwing/reentrant observers. Five browser declarations restore legacy coverage
+and exercise the new host fixes; the existing query/pixel case now covers opaque
+named/RGBA/HSL backgrounds at construction and runtime. The native viewport API,
+not a JavaScript parser, makes history-clear behavior chunk-independent.
 
 See [the migration notes](../docs/migration-libghostty-vt.md) for independent
 reference/package validation, improvements and the approved native scrollback

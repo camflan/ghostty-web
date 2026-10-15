@@ -359,6 +359,13 @@
       "unsupported": []
     },
     {
+      "id": "color.bg-default-query-matches-canvas",
+      "required": ["web-candidate"],
+      "gaps": [],
+      "unsupported": ["web-pinned"],
+      "reason": "Native-only protocol coverage: the archived legacy ResponseHandler.colorOperation is an explicit no-op (patches/legacy/ghostty-wasm-api.patch), so its ABI cannot produce OSC 11 replies. No legacy patch or JS parser is added."
+    },
+    {
       "id": "color.bg-default-uses-theme-background",
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
@@ -551,16 +558,80 @@
     },
     {
       "id": "scroll.output-while-viewing-history-jumps-to-bottom",
+      "required": ["web-pinned"],
+      "gaps": [],
+      "unsupported": ["web-candidate"],
+      "reason": "Archived legacy policy characterization. The approved native contract preserves viewed history instead, covered by its separate required keeps-viewed-rows case; no native jump-on-output option exists."
+    },
+    {
+      "id": "scroll.user-input-resumes-following",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.fractional-wheel-survives-streaming-output",
+      "required": ["web-candidate"],
+      "gaps": [],
+      "unsupported": ["web-pinned"],
+      "reason": "Native reading-preservation contract. Archived legacy deliberately jumps to bottom on output, which cancels local wheel input."
+    },
+    {
+      "id": "scroll.clear-output-is-chunk-independent",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.thumb-drag-preserves-anchor-during-output",
+      "required": ["web-candidate"],
+      "gaps": [],
+      "unsupported": ["web-pinned"],
+      "reason": "Native content-preserving output policy during a local drag. Archived legacy intentionally follows output instead."
+    },
+    {
+      "id": "scroll.thumb-takeover-settles-to-whole-rows",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.nested-resize-delivers-final-position",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.reentrant-observer-keeps-wheel-responsive",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.clear-at-shell-prompt-preserves-viewed-rows",
+      "required": ["web-candidate"],
+      "gaps": [],
+      "unsupported": ["web-pinned"],
+      "reason": "Native viewport-preservation contract, including semantic-prompt ED2 history growth. Archived legacy has no native viewport anchoring API and retains its existing clear/output policy."
+    },
+    {
+      "id": "scroll.resize-taller-clamps-history",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "scroll.output-at-bottom-follows-newest-rows",
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
       "unsupported": []
     },
     {
       "id": "scroll.output-while-viewing-history-keeps-viewed-rows",
-      "required": [],
-      "gaps": ["web-pinned", "web-candidate"],
+      "required": ["web-candidate"],
+      "gaps": ["web-pinned"],
       "unsupported": [],
-      "reason": "WEB-09 [js-layer]: Policy pending (product divergence; native target), not a row-correctness bug: ghostty-web deliberately follows xterm.js and jumps to the bottom on output (characterized by scroll.output-while-viewing-history-jumps-to-bottom); native Ghostty keeps the viewed history rows on screen. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
+      "reason": "WEB-09: Native tracks the viewed content with upstream tracked grid refs. The archived legacy ABI has no equivalent and retains its jump-on-output behavior. (provenance: tests/gaps/browser/history/interaction-known-failures.json)"
     },
     {
       "id": "scroll.control-wrong-and-stale-rows-are-detected",

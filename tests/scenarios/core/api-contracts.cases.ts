@@ -73,6 +73,64 @@ describe('buffer', () => {
     });
   });
 
+  regressionCase('api.buffer-history-offsets', (checks) => {
+    return withTerminal({ cols: 20, rows: 4, scrollback: 1000 }, ({ term }) => {
+      term.write(Array.from({ length: 30 }, (_, i) => `line ${i}\r\n`).join('') + 'PROMPT$ ');
+      const buffer = term.buffer.active;
+      checks.equal('base-at-live-screen', buffer.baseY, 27);
+      checks.equal(
+        'cursor-line',
+        buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString(true),
+        'PROMPT$'
+      );
+      term.scrollLines(-5);
+      checks.equal('viewport-top', buffer.viewportY, 22);
+      checks.equal(
+        'viewport-line',
+        buffer.getLine(buffer.viewportY)?.translateToString(true),
+        'line 22'
+      );
+      term.viewportY = 5.75;
+      checks.equal('fractional-viewport', buffer.viewportY, 22);
+      term.scrollToTop();
+      checks.equal('oldest-row', buffer.viewportY, 0);
+      term.scrollToBottom();
+      checks.equal('following', buffer.viewportY, buffer.baseY);
+      term.write(`${E}[?1049h`);
+      checks.equal(
+        'alternate-offsets',
+        [term.buffer.active.baseY, term.buffer.active.viewportY],
+        [0, 0]
+      );
+      term.write(`${E}[?1049l`);
+      checks.equal('restored-normal-base', term.buffer.active.baseY, 27);
+      term.reset();
+      checks.equal(
+        'reset-offsets',
+        [term.buffer.active.baseY, term.buffer.active.viewportY],
+        [0, 0]
+      );
+    });
+  });
+
+  regressionCase('api.resize-clamps-history-viewport', (checks) => {
+    return withTerminal({ cols: 80, rows: 4, scrollback: 1000 }, ({ term }) => {
+      term.write(Array.from({ length: 100 }, (_, i) => `line ${i}\r\n`).join(''));
+      term.scrollToTop();
+      const scrolls: number[] = [];
+      term.onScroll((offset) => scrolls.push(offset));
+      term.resize(80, 10);
+      checks.equal('history-was-pulled', term.getScrollbackLength(), 91);
+      checks.equal('clamped-offset', term.getViewportY(), 91);
+      checks.equal('notification', scrolls, [91]);
+      checks.equal(
+        'oldest-row-readable',
+        term.buffer.active.getLine(0)?.translateToString(true),
+        'line 0'
+      );
+    });
+  });
+
   regressionCase('api.buffer-is-wrapped', (checks) => {
     return withTerminal({ cols: 5, rows: 3 }, ({ term }) => {
       term.write('abcdefg');

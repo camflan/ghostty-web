@@ -68,8 +68,8 @@ the native backend.
 
 An exact compatibility cap may be implemented later, together with correct
 selection and viewport tracking when the logical history window advances.
-Scroll-on-output is a separate product-policy question; adopting native retention
-does not silently change today's jump-to-bottom-on-output behavior.
+Scroll-on-output was decided separately from retention: the approved follow-up
+below preserves the viewed content on native without changing the retention budget.
 
 ## Regression policy and evidence
 
@@ -95,18 +95,19 @@ does not silently change today's jump-to-bottom-on-output behavior.
 
 ## Final validation
 
-The required baseline, including both integration review rounds, was
-validated on **2026-10-13**:
+The required baseline, including both integration review rounds and the approved
+output/background policies and selected round-3/4/5 review fixes, was validated on **2026-10-14**:
 
-- **1,109 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **325 native / 278 legacy passes** (267 / 220 behavior cases plus
+- **1,181 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core: **327 native / 280 legacy passes** (269 / 222 behavior cases plus
   58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **122 native / 92 legacy passes**, zero skips, retries or flaky
+- Required browser: **133 native / 99 legacy passes**, zero skips, retries or flaky
   results in the canonical container. All eight reviewed scene images are unchanged.
-- Opt-in core gaps: **1 native / 50 legacy failures**. Opt-in browser gaps:
-  **1 native / 31 legacy failures**. Every gap run exited **1**; these are open
-  defects/parity requirements, not passing regression coverage. Counts across
-  lanes overlap in findings and are not unique bug counts.
+- Remaining gap scope: **1 native / 50 legacy core cases**, and **0 native /
+  31 legacy browser cases**. The unresolved cases failed their earlier explicit
+  gap runs (exit **1**); they are not passing regression coverage. The native
+  history-preservation case now passes its original assertion in the required
+  suite. Gap counts overlap in findings and are not unique bug counts.
 - The independently rebuilt upstream reference passed **157 checks**; the real
   package consumer passed **6 checks**. Formatting, lint, both TypeScript projects,
   and the full native shipping build passed. Workflow lint and shellcheck passed
@@ -533,18 +534,62 @@ cleanup, key ownership and modifier reporting, read-only wheel input, resize ord
 and legacy repaint corrections. The report also records the historical default-color
 query/render mismatch that remains a compatibility decision, not a claimed fix.
 
-## Remaining API and policy decisions
+## Approved output and default-background policies
+
+The native host preserves its reading position when output arrives while scrolled
+back. During parsing it delegates to the upstream viewport state machine, which
+already distinguishes ED3/RIS from retention pruning at the exact byte boundary.
+After parsing it reads back the native scrollbar position and returns the active
+native viewport to the bottom. Render-state refreshes temporarily use the bottom
+as well, so a synchronized-output hold beginning mid-write captures the live screen,
+not history. No native source patch, input pre-parser, or selection borrowing is
+needed. This replaces the initial tracked-ref approach, which could not distinguish
+history clear from pruning after a large combined write.
+
+A pruned anchor clamps to the oldest retained content. Reset/history clear resumes
+following; entering alternate screen shows its live area and exiting restores the
+primary reading position. Split and combined streams now agree, including a clear
+followed by output exceeding the budget and primary/alternate round trips.
+
+Typing and paste resume following before their data is emitted (and before a
+synchronous PTY echo); modifier-only/release and mouse reports do not. Program replies
+never count as user input. Pending wheel destinations settle before anchoring without
+losing fractional wheel remainder. Resize clamps both the viewport and pending target
+before observers run. Anchored scroll notifications survive a throwing reply, bell,
+or title listener; reentrant navigation owns its own notifications and the original
+error is preserved if a scroll listener also throws.
+
+The browser Terminal's omitted background is passed to the engine as `#1e1e1e`,
+matching the existing canvas appearance and native OSC 11 replies. Constructor and
+runtime partial/empty themes share this default. Opaque CSS colors such as names,
+`rgba(..., 1)`, and HSL are normalized with a detached browser canvas before being
+passed to the engine; transparent colors retain their prior fallback rather than
+being made opaque. Explicit black, custom colors, and program OSC overrides remain
+supported. The low-level Ghostty facade's independent defaults are unchanged.
+
+Public active-normal-buffer `baseY` now reports the actual history length and
+`viewportY` the absolute top row (`baseY - floor(hostOffset)`). Alternate-buffer
+positions are zero. General inactive-normal-screen access remains an upstream API
+limitation, not hidden by these getter fixes.
+
+The original history-preservation browser assertion is required on native. The
+original scrolled-back jump-on-output characterization is again required on legacy,
+in addition to bottom-follow coverage on both engines. Native and legacy policy-only
+cases explicitly mark the other policy inapplicable; no failing required case was
+reclassified as a gap. New browser checks cover input-following, fractional wheel
+input under output, clear/reset chunking, resize pixels, and constructor/runtime
+CSS background queries. Two new required core cases verify public offsets and resize
+bounds on both engines. The background-query probe remains native-only because the
+archived legacy `ResponseHandler.colorOperation` is a no-op. Reviewed images and
+unrelated required assertions are unchanged.
+
+## Remaining API limitations
 
 The shipping Ghostty source remains unpatched at the reviewed pin. Two API limits
 are not hidden by the improvements above: general inactive-normal-screen buffer
 reads are unavailable, and exact repeated/in-write focus-enable reports need an
 upstream mode/focus hook. Either an upstream extension or an explicitly approved
 temporary native patch is required; no such patch is included here.
-
-Scroll-on-output also retains the existing jump-to-bottom default. Preserving the
-viewed history by default (with a compatibility option), or making preservation
-opt-in, is a product choice still awaiting approval. Its native-policy gap is not
-silently reclassified as passing.
 
 A required selection-browser check exposed an unrelated edge timer race during
 integration. At a clamped viewport, a delayed auto-scroll tick could move an

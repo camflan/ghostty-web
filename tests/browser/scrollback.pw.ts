@@ -7,10 +7,8 @@
  * written line) and the user's actions (lines scrolled). Viewport state from
  * the public API is only used for waits and state/pixel consistency.
  *
- * Policy for output while viewing history (WEB-09): ghostty-web currently
- * follows xterm.js and jumps to the bottom; native Ghostty keeps the viewed
- * content. Both are pinned here — the first as a characterization, the second
- * as a "policy pending" native target — and neither is a row-correctness bug.
+ * Native preserves viewed history on output and follows actual typed input.
+ * The archived legacy backend retains its explicit jump-on-output policy.
  */
 
 import { type CaseContext, THEME, rtest } from './support/fixture';
@@ -183,9 +181,8 @@ rtest('scroll.scrollbar-drag-past-top-clamps-to-oldest', async (ctx) => {
 });
 
 rtest('scroll.output-while-viewing-history-jumps-to-bottom', async (ctx) => {
-  // CHARACTERIZATION of the current, documented xterm.js-compatible policy
-  // (lib/terminal.ts write(): "Auto-scroll to bottom on new output"). Not a
-  // native-Ghostty oracle; remove when the scroll-on-output policy changes.
+  // Required legacy characterization, retained unchanged. Native's intentional
+  // preservation policy has its own required assertion below.
   const { fx, g } = await fixture(ctx);
   await wheelLines(ctx, g, 20);
   await fx.term.writeAndSettle(`\r\n${linesBytes(3, TOTAL)}`);
@@ -198,10 +195,22 @@ rtest('scroll.output-while-viewing-history-jumps-to-bottom', async (ctx) => {
   );
 });
 
+rtest('scroll.output-at-bottom-follows-newest-rows', async (ctx) => {
+  // Following live output is unchanged; only scrolled-back reading is pinned.
+  const { fx } = await fixture(ctx);
+  await fx.term.writeAndSettle(`\r\n${linesBytes(3, TOTAL)}`);
+  ctx.checks.equal('viewport-at-bottom', (await fx.term.viewport()).viewportY, 0);
+  const total = TOTAL + 3;
+  ctx.checks.equal(
+    'rows-are-newest',
+    await shownLines(fx),
+    Array.from({ length: ROWS }, (_, row) => total - ROWS + row)
+  );
+});
+
 rtest('scroll.output-while-viewing-history-keeps-viewed-rows', async (ctx) => {
-  // NATIVE TARGET, policy pending (product divergence, not a row bug): native
-  // Ghostty pins the viewport to content while scrolled back, so the same
-  // history lines stay on screen when output arrives.
+  // Approved native policy: keep the same content, not the same bottom offset.
+  // The original gap assertion is unchanged.
   const { fx, g } = await fixture(ctx);
   await wheelLines(ctx, g, 20);
   const viewed = await shownLines(fx);
@@ -257,3 +266,202 @@ function fillRow(image: Image, grid: Grid, row: number, hex: string): void {
     image.data.set([r, g, b, 255], i);
   }
 }
+
+rtest('scroll.user-input-resumes-following', async (ctx) => {
+  const { fx, g } = await fixture(ctx);
+  await wheelLines(ctx, g, 20);
+  await fx.term.clearEvents();
+  await fx.term.clickCell(1, 1);
+  await ctx.harness.page.keyboard.press('x');
+  const data = (await fx.term.events()).data.join('');
+  ctx.checks.equal('key-forwarded', data, 'x');
+  await fx.term.writeAndSettle(data); // deterministic PTY echo
+  ctx.checks.equal('key-echo-at-bottom', (await fx.term.viewport()).viewportY, 0);
+  await wheelLines(ctx, g, 20);
+  await fx.term.clearEvents();
+  await fx.term.paste('pasted');
+  const paste = (await fx.term.events()).data.join('');
+  ctx.checks.equal('paste-forwarded', paste, 'pasted');
+  await fx.term.writeAndSettle(paste);
+  ctx.checks.equal('paste-echo-at-bottom', (await fx.term.viewport()).viewportY, 0);
+});
+
+rtest('scroll.fractional-wheel-survives-streaming-output', async (ctx) => {
+  const { fx, g } = await fixture(ctx);
+  for (let i = 0; i < 20; i++) {
+    await wheelPixels(ctx, g, -g.cellH / 4);
+    await fx.term.writeAndSettle('');
+  }
+  ctx.checks.equal('accumulated-rows', (await fx.term.viewport()).viewportY, 5);
+  ctx.checks.equal('displayed-content', await shownLines(fx), expectedViewport(fx, 5));
+});
+
+rtest('scroll.clear-output-is-chunk-independent', async (ctx) => {
+  for (const sequence of ['\x1bc', '\x1b[3J', '\x1b[H\x1b[2J\x1b[3J']) {
+    const split = await fixture(ctx);
+    const combined = await fixture(ctx);
+    await split.fx.term.scrollLines(-20);
+    await combined.fx.term.scrollLines(-20);
+    const output = `\x1b[?25l\r\n${linesBytes(30, TOTAL)}`;
+    await split.fx.term.writeAndSettle(sequence);
+    await split.fx.term.writeAndSettle(output);
+    await combined.fx.term.writeAndSettle(sequence + output);
+    ctx.checks.equal('split-bottom', (await split.fx.term.viewport()).viewportY, 0);
+    ctx.checks.equal('combined-bottom', (await combined.fx.term.viewport()).viewportY, 0);
+    ctx.checks.equal(
+      'same-visible-rows',
+      await shownLines(combined.fx),
+      await shownLines(split.fx)
+    );
+  }
+});
+
+rtest('scroll.resize-taller-clamps-history', async (ctx) => {
+  const { fx } = await fixture(ctx);
+  await fx.term.scrollToTop();
+  const oldRows = await shownLines(fx);
+  const before = await fx.term.viewport();
+  await fx.term.resize(COLS, ROWS + 6);
+  await fx.term.settle();
+  const after = await fx.term.viewport();
+  ctx.checks.equal('history-pulled', after.scrollbackLength, before.scrollbackLength - 6);
+  ctx.checks.equal('clamped-at-top', after.viewportY, after.scrollbackLength);
+  ctx.checks.equal('top-rows-painted', (await shownLines(fx)).slice(0, ROWS), oldRows);
+});
+
+rtest('scroll.reentrant-observer-keeps-wheel-responsive', async (ctx) => {
+  const { fx, g } = await fixture(ctx, 100);
+  await ctx.harness.page.evaluate(
+    (id) => window.__ghosttyRegression.navigateOnNextScroll(id, 10),
+    fx.term.id
+  );
+  await wheelLines(ctx, g, 5);
+  await ctx.harness.page.waitForFunction(
+    (id) => window.__ghosttyRegression.viewport(id).viewportY === 10,
+    fx.term.id
+  );
+  await wheelLines(ctx, g, 3);
+  await ctx.harness.page.waitForFunction(
+    (id) => window.__ghosttyRegression.viewport(id).viewportY === 13,
+    fx.term.id
+  );
+  ctx.checks.equal('rows-after-next-gesture', await shownLines(fx), expectedViewport(fx, 13));
+});
+
+rtest('scroll.clear-at-shell-prompt-preserves-viewed-rows', async (ctx) => {
+  const { fx, g } = await fixture(ctx);
+  await fx.term.writeAndSettle('\r\n\x1b]133;A\x07$ ');
+  await wheelLines(ctx, g, 20);
+  const before = await fx.term.viewport();
+  const expected = Array.from({ length: ROWS }, (_, row) => TOTAL + 1 - ROWS - 20 + row);
+  ctx.checks.equal('rows-before-clear', await shownLines(fx), expected);
+  await fx.term.clearEvents();
+  await ctx.harness.page.evaluate((id) => window.__ghosttyRegression.clear(id), fx.term.id);
+  await fx.term.settle();
+  const after = await fx.term.viewport();
+  ctx.checks.equal(
+    'semantic-clear-grows-history',
+    after.scrollbackLength > before.scrollbackLength,
+    true
+  );
+  ctx.checks.equal(
+    'anchor-offset',
+    after.viewportY,
+    before.viewportY + after.scrollbackLength - before.scrollbackLength
+  );
+  ctx.checks.equal('rows-after-clear', await shownLines(fx), expected);
+  ctx.checks.equal('scroll-notified', (await fx.term.events()).scrolls, [after.viewportY]);
+});
+
+rtest('scroll.thumb-drag-preserves-anchor-during-output', async (ctx) => {
+  const { fx, g } = await fixture(ctx);
+  await wheelLines(ctx, g, 20);
+  const before = await shownLines(fx);
+  const initial = await fx.term.viewport();
+  const track = g.rect.height - 8;
+  const thumb = Math.max(20, (ROWS / (initial.scrollbackLength + ROWS)) * track);
+  const x = g.rect.left + g.rect.width - 8;
+  const y = Math.round(
+    g.rect.top +
+      4 +
+      (track - thumb) * (1 - initial.viewportY / initial.scrollbackLength) +
+      thumb / 2
+  );
+  const mouse = ctx.harness.page.mouse;
+  await mouse.move(x, y);
+  await mouse.down();
+  try {
+    await fx.term.writeAndSettle(`\r\n${linesBytes(5, TOTAL)}`);
+    const anchored = await fx.term.viewport();
+    ctx.checks.equal('output-anchor', anchored.viewportY, 25);
+    ctx.checks.equal('output-keeps-rows', await shownLines(fx), before);
+    await mouse.move(x + 1, y);
+    ctx.checks.equal('horizontal-motion-keeps-offset', (await fx.term.viewport()).viewportY, 25);
+    ctx.checks.equal('horizontal-motion-keeps-rows', await shownLines(fx), before);
+    const travel = track - Math.max(20, (ROWS / (anchored.scrollbackLength + ROWS)) * track);
+    await mouse.move(x + 1, y - 12);
+    const expected = 25 + Math.round((12 * anchored.scrollbackLength) / travel);
+    ctx.checks.equal(
+      'vertical-motion-still-scrolls',
+      (await fx.term.viewport()).viewportY,
+      expected
+    );
+    const top = TOTAL + 5 - ROWS - expected;
+    ctx.checks.equal(
+      'vertical-motion-paints-rows',
+      await shownLines(fx),
+      Array.from({ length: ROWS }, (_, i) => top + i)
+    );
+  } finally {
+    await mouse.up();
+  }
+});
+
+rtest('scroll.thumb-takeover-settles-to-whole-rows', async (ctx) => {
+  const { fx, g } = await fixture(ctx, 1000);
+  await fx.term.clearEvents();
+  await wheelLines(ctx, g, 20);
+  const state = await fx.term.viewport();
+  const track = g.rect.height - 8;
+  const thumb = Math.max(20, (ROWS / (state.scrollbackLength + ROWS)) * track);
+  const travel = track - thumb;
+  const x = g.rect.left + g.rect.width - 8;
+  const y = Math.round(
+    g.rect.top + 4 + travel * (1 - state.viewportY / state.scrollbackLength) + thumb / 2
+  );
+  const mouse = ctx.harness.page.mouse;
+  await mouse.move(x, y);
+  await mouse.down();
+  try {
+    ctx.checks.equal('wheel-intent-settled', (await fx.term.viewport()).viewportY, 20);
+    await mouse.move(x, y - 8);
+  } finally {
+    await mouse.up();
+  }
+  await fx.term.settle();
+  const expected = 20 + Math.round((8 * state.scrollbackLength) / travel);
+  ctx.checks.equal('drag-ends-at-whole-row', (await fx.term.viewport()).viewportY, expected);
+  ctx.checks.equal(
+    'integer-scroll-events',
+    (await fx.term.events()).scrolls.every(Number.isInteger),
+    true
+  );
+  ctx.checks.equal('rows-match-drag', await shownLines(fx), expectedViewport(fx, expected));
+});
+
+rtest('scroll.nested-resize-delivers-final-position', async (ctx) => {
+  const { fx } = await fixture(ctx);
+  await fx.term.scrollToTop();
+  const before = await fx.term.viewport();
+  await fx.term.clearEvents();
+  await ctx.harness.page.evaluate(
+    (id) => window.__ghosttyRegression.resizeOnNextResize(id, 41, 18),
+    fx.term.id
+  );
+  await fx.term.resize(COLS, ROWS + 6);
+  await fx.term.settle();
+  const after = await fx.term.viewport();
+  ctx.checks.equal('nested-dimensions', [after.cols, after.rows], [41, 18]);
+  ctx.checks.equal('clamped-offset', after.viewportY, before.scrollbackLength - 6);
+  ctx.checks.equal('one-final-scroll-event', (await fx.term.events()).scrolls, [after.viewportY]);
+});

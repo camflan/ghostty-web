@@ -64,7 +64,14 @@ bun test tests/browser/suite.test.ts
 - `scrollback.pw.ts`: real wheel and scrollbar drags through 600 color-marked lines, boundary clamping, smooth-scroll completion, stale/wrong-row controls and explicit scroll-on-output characterization.
 - `selection-history.pw.ts`: real forward/reverse and edge-auto-scroll drags, clipboard text and complete highlight maps across history, soft wraps, wide/combining text, new output, pruning and reflow.
 - `scenes.pw.ts`: eight whole-grid visual baselines and erase/shift controls, in a matching browser/OS image.
-- The scroll-on-output native target is a gap explicitly marked **policy pending** (`scope.json`), not a silent change to the current default; the current jump-to-bottom behaviour is a required characterization.
+- The approved native scroll-on-output policy preserves viewed history. Its original
+  assertion is required; bottom-follow coverage is shared, and the original
+  jump-on-output assertion is required on legacy only. Legacy's preservation gap
+  remains explicit. New cases exercise user-input following, fractional wheel
+  accumulation while output arrives, reset/clear chunking, and resize clamping.
+- The default-background probe checks native OSC 11 replies against canvas pixels,
+  including opaque CSS names/RGBA/HSL at construction and runtime.
+  It is unsupported on legacy because its archived color-operation handler is a no-op.
 
 CI runs the browser suite once, with no retries or responsiveness benchmarks. The optional Linux container command is `bun run test:regression:container`; use it when host rasterization differs.
 

@@ -134,6 +134,8 @@ export interface TerminalBackend {
   readResponse(): string | null;
 
   // ---- libghostty-vt only (absent on legacy) ----
+  /** Let native viewport tracking follow a write, updating the host offset even on error. */
+  preserveViewport?(offset: number, write: () => void, update: (offset: number) => void): void;
   /** Real cell metrics for size reports and the native pixel size. */
   setCellPixelSize?(widthPx: number, heightPx: number): void;
   /** Current Kitty keyboard protocol flags of the active screen. */

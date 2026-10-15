@@ -35,7 +35,7 @@ import type {
 import { LinkDetector } from './link-detector';
 import { OSC8LinkProvider } from './providers/osc8-link-provider';
 import { UrlRegexProvider } from './providers/url-regex-provider';
-import { CanvasRenderer } from './renderer';
+import { CanvasRenderer, DEFAULT_THEME } from './renderer';
 import { SelectionManager } from './selection-manager';
 import type { ILink, ILinkProvider } from './types';
 
@@ -139,6 +139,7 @@ export class Terminal implements ITerminalCore {
   private dispatchingHostQueue = false;
   private resizeDepth = 0;
   private resizeGeneration = 0;
+  private scrollNotificationVersion = 0;
 
   // Phase 2: Viewport and scrolling state
   public viewportY: number = 0; // Top line of viewport in scrollback buffer (0 = at bottom, can be fractional during smooth scroll)
@@ -147,14 +148,16 @@ export class Terminal implements ITerminalCore {
   private wheelCellHeight = 0;
   private scrollAnimationStartTime?: number;
   private scrollAnimationStartY?: number;
+  private scrollAnimationDuration?: number;
   private scrollAnimationFrame?: number;
+  private scrollAnimationGeneration = 0;
   private customWheelEventHandler?: (event: WheelEvent) => boolean;
   private lastCursorY: number = 0; // Track cursor position for onCursorMove
 
   // Scrollbar interaction state
   private isDraggingScrollbar: boolean = false;
-  private scrollbarDragStart: number | null = null;
-  private scrollbarDragStartViewportY: number = 0;
+  private scrollbarDragY: number | null = null; // Last processed client-space pointer Y
+  private scrollbarDragRemainder = 0; // Sub-row pointer movement, carried across output/resize
 
   // Scrollbar visibility/auto-hide state
   private scrollbarVisible: boolean = false;
@@ -316,6 +319,9 @@ export class Terminal implements ITerminalCore {
     if (drainResponses) this.processTerminalResponses();
   }
 
+  /** Lazily created, detached 1px canvas for browser CSS color normalization. */
+  private cssColorContext?: CanvasRenderingContext2D | null;
+
   /** Parse supported CSS RGB colors; missing/invalid is distinct from explicit black. */
   private parseColorToHex(color?: string): number | undefined {
     if (!color) return undefined;
@@ -331,10 +337,36 @@ export class Terminal implements ITerminalCore {
     }
     if (/^#[0-9a-f]{6}$/i.test(color)) return Number.parseInt(color.slice(1), 16);
     const match = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-    if (!match) return undefined;
-    const channels = match.slice(1).map(Number);
-    if (channels.some((channel) => channel > 255)) return undefined;
-    return (channels[0] << 16) | (channels[1] << 8) | channels[2];
+    if (match) {
+      const channels = match.slice(1).map(Number);
+      if (channels.every((channel) => channel <= 255)) {
+        return (channels[0] << 16) | (channels[1] << 8) | channels[2];
+      }
+    }
+    // Let the same browser that paints the theme resolve named colors, opaque
+    // rgba()/hsl(), and other CSS forms into sRGB. This runs only on configuration
+    // changes, never in the render loop. Two sentinels detect invalid setters
+    // (Canvas silently retains the old fillStyle for invalid CSS).
+    if (typeof document === 'undefined') return undefined;
+    if (this.cssColorContext === undefined) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      this.cssColorContext = canvas.getContext('2d', { willReadFrequently: true });
+    }
+    const ctx = this.cssColorContext;
+    if (!ctx) return undefined;
+    ctx.fillStyle = '#010203';
+    ctx.fillStyle = color;
+    const first = ctx.fillStyle;
+    ctx.fillStyle = '#040506';
+    ctx.fillStyle = color;
+    if (first !== ctx.fillStyle) return undefined;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    const rgba = ctx.getImageData(0, 0, 1, 1).data;
+    // OSC colors have no alpha channel. Keep the established unsupported-alpha
+    // fallback instead of turning a transparent canvas theme into an opaque one.
+    return rgba[3] === 255 ? (rgba[0] << 16) | (rgba[1] << 8) | rgba[2] : undefined;
   }
 
   /**
@@ -343,11 +375,6 @@ export class Terminal implements ITerminalCore {
   private buildWasmConfig(): GhosttyTerminalConfig | undefined {
     const theme = this.options.theme;
     const scrollback = this.options.scrollback;
-
-    // If no theme and default scrollback, use defaults
-    if (!theme && scrollback === 10000) {
-      return undefined;
-    }
 
     // Build palette array from theme colors
     // Order: black, red, green, yellow, blue, magenta, cyan, white,
@@ -372,7 +399,9 @@ export class Terminal implements ITerminalCore {
     ];
 
     const foreground = this.parseColorToHex(theme?.foreground);
-    const background = this.parseColorToHex(theme?.background);
+    // The engine's OSC 11 reply must describe the default the canvas paints.
+    // Keep the low-level Ghostty facade defaults separate from this browser theme.
+    const background = this.parseColorToHex(theme?.background ?? DEFAULT_THEME.background);
     const cursor = this.parseColorToHex(theme?.cursor);
     return {
       scrollbackLimit: scrollback,
@@ -516,7 +545,7 @@ export class Terminal implements ITerminalCore {
       this.inputHandler = new InputHandler(
         this.ghostty!,
         parent,
-        (data: string, preserveSelection = false) => {
+        (data: string, preserveSelection = false, userInput = true) => {
           // Check if stdin is disabled
           if (this.options.disableStdin) {
             return;
@@ -524,6 +553,8 @@ export class Terminal implements ITerminalCore {
           // Modifier reports are protocol input, not typed text: keep local
           // selection available for Shift gestures and copy shortcuts.
           if (!preserveSelection) this.selectionManager?.clearSelection();
+          if (this.isDisposed) return;
+          if (userInput && !preserveSelection && data.length && !this.prepareUserInput()) return;
           this.awaitingEcho = true;
           // Input handler fires data events
           this.dataEmitter.fire(data);
@@ -650,8 +681,20 @@ export class Terminal implements ITerminalCore {
     // Observe completed parser state without inspecting/re-parsing the input.
     const native = this.wasmTerm!.backend === 'libghostty-vt';
     const hadFocusReports = native && this.wasmTerm!.hasFocusEvents();
-    // Write directly to WASM terminal (handles VT parsing internally)
-    this.wasmTerm!.write(data);
+    // Settle pending wheel intent before anchoring. Native viewport tracking
+    // follows the content through pruning and distinguishes history clears.
+    // Resolve before host listeners: nested writes/navigation must see the new
+    // position, and must not be overwritten when this outer write returns.
+    const previousViewportY = this.viewportY;
+    if (native) {
+      this.cancelWheelScroll(false, true);
+      this.wasmTerm!.writeWithViewport(data, this.viewportY, (offset) => {
+        this.viewportY = offset;
+        this.targetViewportY = offset;
+      });
+    } else {
+      this.wasmTerm!.write(data);
+    }
 
     if (native) {
       // Replies (onData), bells and title changes in the order the parser
@@ -663,7 +706,34 @@ export class Terminal implements ITerminalCore {
       // Decide before listeners run: a nested write may enable focus reporting,
       // but must not manufacture a second enable for this outer, disabled write.
       if (!hadFocusReports && this.wasmTerm!.hasFocusEvents()) this.hostQueue.push(FOCUS_REPORT);
-      this.dispatchHostQueue();
+      const anchoredViewportY = this.viewportY;
+      const scrollVersion = this.scrollNotificationVersion;
+      let failed = false;
+      let firstError: unknown;
+      try {
+        this.dispatchHostQueue();
+      } catch (error) {
+        failed = true;
+        firstError = error;
+      }
+      // Either observer can throw without stranding the other notification.
+      // Nested navigation (even away and back to the same offset) owns its
+      // notifications; preserve the first error and never emit a stale duplicate.
+      try {
+        if (
+          !this.isDisposed &&
+          this.scrollNotificationVersion === scrollVersion &&
+          this.viewportY === anchoredViewportY &&
+          this.viewportY !== previousViewportY
+        )
+          this.emitScroll(this.viewportY);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+        }
+      }
+      if (failed) throw firstError;
       if (this.isDisposed) return;
     } else {
       // Process any responses generated by the terminal (e.g., DSR cursor position)
@@ -682,10 +752,9 @@ export class Terminal implements ITerminalCore {
     // Invalidate link cache (content changed)
     this.linkDetector?.invalidateCache();
 
-    // Phase 2: Auto-scroll to bottom on new output (xterm.js behavior)
-    // New output still follows the existing jump-to-bottom policy, including
-    // an unfinished wheel animation whose first frame has not moved yet.
-    this.scrollToBottom();
+    // The archived comparison backend has no native viewport API; retain its
+    // old output policy rather than approximating anchors with history counts.
+    if (!native) this.scrollToBottom();
 
     // Check for title changes (OSC 0, 1, 2 sequences)
     // Legacy heuristic only; libghostty-vt reports titles natively (above)
@@ -725,6 +794,16 @@ export class Terminal implements ITerminalCore {
     }
   }
 
+  /** Resume following only actual user input, before a possibly synchronous PTY echo. */
+  private prepareUserInput(): boolean {
+    if (this.isDisposed || this.options.disableStdin) return false;
+    if (this.wasmTerm?.backend === 'libghostty-vt') this.scrollToBottom();
+    // A scroll observer can dispose or disable input reentrantly.
+    if (this.isDisposed || this.options.disableStdin) return false;
+    this.awaitingEcho = true;
+    return true;
+  }
+
   /**
    * Paste text into terminal (triggers bracketed paste if supported)
    */
@@ -738,8 +817,7 @@ export class Terminal implements ITerminalCore {
 
     if (this.wasmTerm!.backend === 'libghostty-vt') {
       const bytes = this.wasmTerm!.encodePaste(data);
-      if (bytes.length) {
-        this.awaitingEcho = true;
+      if (bytes.length && this.prepareUserInput()) {
         this.dataEmitter.fire(new TextDecoder().decode(bytes));
       }
       return;
@@ -772,6 +850,7 @@ export class Terminal implements ITerminalCore {
     }
 
     if (wasUserInput) {
+      if (data.length && !this.prepareUserInput()) return;
       this.awaitingEcho = true;
       // Trigger onData event as if user typed it
       this.dataEmitter.fire(data);
@@ -797,6 +876,9 @@ export class Terminal implements ITerminalCore {
     // cleared via requestAnimationFrame (rAF is throttled/paused in background tabs).
     this.cancelRenderLoop();
     this.resizeDepth++;
+    const previousViewportY = this.viewportY;
+    const scrollVersion = this.scrollNotificationVersion;
+    let generation = 0;
     let failed = false;
     let firstError: unknown;
     const preserveError = (error: unknown) => {
@@ -809,7 +891,12 @@ export class Terminal implements ITerminalCore {
       this.wasmTerm!.resize(cols, rows);
       this.cols = cols;
       this.rows = rows;
-      const generation = ++this.resizeGeneration;
+      generation = ++this.resizeGeneration;
+      // Growing/reflowing can pull history into the active area. Settle pending
+      // wheel navigation and clamp before any resize observer reads the buffer.
+      this.cancelWheelScroll(false);
+      this.viewportY = Math.max(0, Math.min(this.getScrollbackLength(), this.viewportY));
+      this.targetViewportY = this.viewportY;
       this.renderer!.resize(cols, rows);
       this.syncNativeCellSize(false);
       // A nested successful resize supersedes remaining notifications from
@@ -822,6 +909,20 @@ export class Terminal implements ITerminalCore {
       preserveError(error);
     } finally {
       this.resizeDepth--;
+      try {
+        if (
+          !this.isDisposed &&
+          generation !== 0 &&
+          // New dimensions supersede old resize callbacks, but not an undelivered
+          // scroll change. Notify the CURRENT position unless a nested operation
+          // already notified it (including one whose observer then threw).
+          scrollVersion === this.scrollNotificationVersion &&
+          this.viewportY !== previousViewportY
+        )
+          this.emitScroll(this.viewportY);
+      } catch (error) {
+        preserveError(error);
+      }
       if (!this.isDisposed && this.resizeDepth === 0) {
         try {
           this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
@@ -851,8 +952,11 @@ export class Terminal implements ITerminalCore {
    */
   clear(): void {
     this.assertOpen();
-    // Send ANSI clear screen and cursor home sequences
-    this.wasmTerm!.write('\x1b[2J\x1b[H');
+    // ED2 at a semantic shell prompt can append the active screen to history.
+    // Use the native host path so its anchor, scroll events and caches agree
+    // with write() of the same bytes; retain legacy's established clear policy.
+    if (this.wasmTerm!.backend === 'libghostty-vt') this.writeInternal('\x1b[2J\x1b[H');
+    else this.wasmTerm!.write('\x1b[2J\x1b[H');
   }
 
   /**
@@ -912,7 +1016,7 @@ export class Terminal implements ITerminalCore {
     this.renderer!.clear();
     this.renderer!.render(this.wasmTerm!, true, this.viewportY, this, this.scrollbarOpacity);
     // Observers must see the reset buffer, not the old history with a new viewport.
-    if (viewportChanged) this.scrollEmitter.fire(0);
+    if (viewportChanged) this.emitScroll(0);
   }
 
   /**
@@ -1114,8 +1218,9 @@ export class Terminal implements ITerminalCore {
     const newViewportY = Math.max(0, Math.min(maxScroll, this.viewportY - amount));
 
     this.viewportY = newViewportY;
+    this.targetViewportY = newViewportY;
     if (newViewportY !== before) {
-      this.scrollEmitter.fire(this.viewportY);
+      this.emitScroll(this.viewportY);
 
       // Show scrollbar when scrolling (with auto-hide)
       if (scrollbackLength > 0) {
@@ -1140,8 +1245,9 @@ export class Terminal implements ITerminalCore {
     this.cancelWheelScroll(false);
     const scrollbackLength = this.getScrollbackLength();
     this.viewportY = scrollbackLength;
+    this.targetViewportY = scrollbackLength;
     if (before !== scrollbackLength) {
-      this.scrollEmitter.fire(this.viewportY);
+      this.emitScroll(this.viewportY);
       this.showScrollbar();
     }
   }
@@ -1153,8 +1259,9 @@ export class Terminal implements ITerminalCore {
     const before = this.viewportY;
     this.cancelWheelScroll(false);
     this.viewportY = 0;
+    this.targetViewportY = 0;
     if (before !== 0) {
-      this.scrollEmitter.fire(this.viewportY);
+      this.emitScroll(this.viewportY);
       // Show scrollbar briefly when scrolling to bottom
       if (this.getScrollbackLength() > 0) {
         this.showScrollbar();
@@ -1173,8 +1280,9 @@ export class Terminal implements ITerminalCore {
     const newViewportY = Math.max(0, Math.min(scrollbackLength, line));
 
     this.viewportY = newViewportY;
+    this.targetViewportY = newViewportY;
     if (newViewportY !== before) {
-      this.scrollEmitter.fire(this.viewportY);
+      this.emitScroll(this.viewportY);
 
       // Show scrollbar when scrolling to specific line
       if (scrollbackLength > 0) {
@@ -1183,26 +1291,39 @@ export class Terminal implements ITerminalCore {
     }
   }
 
-  /** Explicit navigation supersedes pending wheel input and animation. */
-  private cancelWheelScroll(emit = true): void {
-    this.wheelRemainder = 0;
-    if (this.scrollAnimationFrame !== undefined) {
-      cancelAnimationFrame(this.scrollAnimationFrame);
-      this.scrollAnimationFrame = undefined;
-      // Wheel destinations are whole rows. Do not strand the view at an
-      // interpolated fractional position when another owner takes over.
-      const target = Math.max(
-        0,
-        Math.min(this.getScrollbackLength(), Math.round(this.targetViewportY))
-      );
-      if (target !== this.viewportY) {
-        this.viewportY = target;
-        if (emit) this.scrollEmitter.fire(target);
-      }
-    }
+  /** Record notification ownership before calling observers that may reenter. */
+  private emitScroll(offset: number): void {
+    this.scrollNotificationVersion++;
+    this.scrollEmitter.fire(offset);
+  }
+
+  /** Invalidate the current owner before invoking any reentrant observers. */
+  private stopScrollAnimation(): void {
+    this.scrollAnimationGeneration++;
+    if (this.scrollAnimationFrame !== undefined) cancelAnimationFrame(this.scrollAnimationFrame);
+    this.scrollAnimationFrame = undefined;
     this.scrollAnimationStartTime = undefined;
     this.scrollAnimationStartY = undefined;
-    this.targetViewportY = this.viewportY;
+    this.scrollAnimationDuration = undefined;
+  }
+
+  /** Explicit navigation supersedes pending wheel input and animation. */
+  private cancelWheelScroll(emit = true, preserveRemainder = false): void {
+    if (!preserveRemainder) this.wheelRemainder = 0;
+    // The first animation step runs synchronously, before there is a frame id.
+    const active =
+      this.scrollAnimationStartTime !== undefined || this.scrollAnimationFrame !== undefined;
+    this.stopScrollAnimation();
+    const target = active
+      ? Math.max(0, Math.min(this.getScrollbackLength(), Math.round(this.targetViewportY)))
+      : this.viewportY;
+    this.targetViewportY = target;
+    if (target !== this.viewportY) {
+      this.viewportY = target;
+      // State is final before delivery: a listener can start a new animation,
+      // and this cancellation must not clear or overwrite the new owner's state.
+      if (emit) this.emitScroll(target);
+    }
   }
 
   /** Smoothly interpolate to a target position; wheel input supplies whole rows. */
@@ -1215,17 +1336,14 @@ export class Terminal implements ITerminalCore {
     // Clamp target to valid range
     const newTarget = Math.max(0, Math.min(maxScroll, targetY));
 
-    // Durations no longer than one frame settle immediately. The asymptotic
-    // ratio below is zero/negative there; invalid durations are instant too.
+    // Keep the established instant behavior for sub-frame/invalid durations.
+    // Longer durations use elapsed time rather than a frame-rate-dependent ratio.
     const duration = this.options.smoothScrollDuration ?? 100;
     if (!Number.isFinite(duration) || duration <= 1000 / 60) {
-      if (this.scrollAnimationFrame !== undefined) cancelAnimationFrame(this.scrollAnimationFrame);
-      this.scrollAnimationFrame = undefined;
-      this.scrollAnimationStartTime = undefined;
-      this.scrollAnimationStartY = undefined;
+      this.stopScrollAnimation();
       this.viewportY = newTarget;
       this.targetViewportY = newTarget;
-      this.scrollEmitter.fire(Math.floor(this.viewportY));
+      this.emitScroll(Math.floor(this.viewportY));
 
       if (scrollbackLength > 0) {
         this.showScrollbar();
@@ -1233,30 +1351,35 @@ export class Terminal implements ITerminalCore {
       return;
     }
 
-    // Update target (accumulate if animation running)
+    const active = this.scrollAnimationStartTime !== undefined;
+    if (active && newTarget === this.targetViewportY) return;
+    // Retarget from the displayed position, preserving the pending destination
+    // accumulated by handleWheel. Reuse the current owner's scheduled frame.
     this.targetViewportY = newTarget;
-
-    // If animation is already running, don't restart it
-    // Just let it continue toward the updated target
-    // This prevents choppy restarts during continuous scrolling
-    if (this.scrollAnimationFrame) {
-      return;
-    }
-
-    // Start new animation
-    this.scrollAnimationStartTime = Date.now();
+    this.scrollAnimationStartTime = performance.now();
     this.scrollAnimationStartY = this.viewportY;
-    this.animateScroll();
+    this.scrollAnimationDuration = duration;
+    if (active) return;
+
+    const generation = ++this.scrollAnimationGeneration;
+    this.animateScroll(generation);
   }
 
-  /**
-   * Animation loop for smooth scrolling
-   * Uses asymptotic approach - moves a fraction of remaining distance each frame
-   */
-  private animateScroll = (): void => {
-    if (!this.wasmTerm || this.scrollAnimationStartTime === undefined) {
+  /** Fixed-duration cubic ease-out, using the monotonic rAF/performance clock. */
+  private animateScroll = (
+    generation = this.scrollAnimationGeneration,
+    timestamp = performance.now()
+  ): void => {
+    if (
+      generation !== this.scrollAnimationGeneration ||
+      !this.wasmTerm ||
+      this.isDisposed ||
+      this.scrollAnimationStartTime === undefined
+    )
       return;
-    }
+    // The callback has consumed its frame; activity is tracked separately so a
+    // write/navigation during emitScroll can still cancel this running step.
+    this.scrollAnimationFrame = undefined;
 
     const duration = this.options.smoothScrollDuration ?? 100;
 
@@ -1265,45 +1388,57 @@ export class Terminal implements ITerminalCore {
     const limit = this.getScrollbackLength();
     this.targetViewportY = Math.max(0, Math.min(limit, this.targetViewportY));
     this.viewportY = Math.max(0, Math.min(limit, this.viewportY));
-    const distance = this.targetViewportY - this.viewportY;
-    const absDistance = Math.abs(distance);
+    // A runtime duration change starts a new segment from what is displayed,
+    // rather than reinterpreting elapsed time and jumping backwards.
+    if (duration !== this.scrollAnimationDuration) {
+      this.scrollAnimationStartTime = timestamp;
+      this.scrollAnimationStartY = this.viewportY;
+      this.scrollAnimationDuration = duration;
+    }
+    const elapsed = Math.max(0, timestamp - this.scrollAnimationStartTime);
 
-    // If very close, snap to target
-    if (absDistance < 0.01 || !Number.isFinite(duration) || duration <= 1000 / 60) {
+    // Complete within one displayed frame of the configured duration. Exact
+    // zero-distance requests and the established instant-duration path need no RAF.
+    if (
+      elapsed >= duration ||
+      this.viewportY === this.targetViewportY ||
+      !Number.isFinite(duration) ||
+      duration <= 1000 / 60
+    ) {
       this.viewportY = this.targetViewportY;
-      this.scrollEmitter.fire(Math.floor(this.viewportY));
-
-      const scrollbackLength = this.getScrollbackLength();
-      if (scrollbackLength > 0) {
-        this.showScrollbar();
-      }
-
-      // Animation complete
-      this.scrollAnimationFrame = undefined;
-      this.scrollAnimationStartTime = undefined;
-      this.scrollAnimationStartY = undefined;
+      // Finish before notifying: the final listener may start another gesture.
+      this.stopScrollAnimation();
+      this.emitScroll(Math.floor(this.viewportY));
+      if (!this.isDisposed && this.getScrollbackLength() > 0) this.showScrollbar();
       return;
     }
 
-    // Move a fraction of the remaining distance
-    // At 60fps, move ~1/6 of distance per frame for ~100ms total duration
-    // This creates smooth deceleration toward target
-    const framesForDuration = (duration / 1000) * 60; // Convert ms to frame count
-    const moveRatio = 1 - (1 / framesForDuration) ** 2; // Ease-out
-    this.viewportY += distance * moveRatio;
+    const start = Math.max(0, Math.min(limit, this.scrollAnimationStartY ?? this.viewportY));
+    // Preserve a first synchronous step even on coarse clocks. It participates in
+    // generation ownership, but does not assume a display rate or consume a frame.
+    const progress = Math.max(Number.EPSILON, Math.min(1, elapsed / duration));
+    const eased = 1 - (1 - progress) ** 3;
+    this.viewportY = start + (this.targetViewportY - start) * eased;
 
     // Fire scroll event (use floor to convert fractional to integer for API)
     const intViewportY = Math.floor(this.viewportY);
-    this.scrollEmitter.fire(intViewportY);
-
-    // Show scrollbar during animation
-    const scrollbackLength = this.getScrollbackLength();
-    if (scrollbackLength > 0) {
-      this.showScrollbar();
+    try {
+      this.emitScroll(intViewportY);
+    } finally {
+      // A reentrant listener can navigate, write, dispose, or start a replacement.
+      // Only this step's still-active owner may schedule its next frame.
+      if (
+        generation === this.scrollAnimationGeneration &&
+        !this.isDisposed &&
+        this.wasmTerm &&
+        this.scrollAnimationStartTime !== undefined
+      ) {
+        if (this.getScrollbackLength() > 0) this.showScrollbar();
+        this.scrollAnimationFrame = requestAnimationFrame((time) =>
+          this.animateScroll(generation, time)
+        );
+      }
     }
-
-    // Continue animation
-    this.scrollAnimationFrame = requestAnimationFrame(this.animateScroll);
   };
 
   // ==========================================================================
@@ -1370,10 +1505,10 @@ export class Terminal implements ITerminalCore {
    */
   private stopTimersAndAnimations(): void {
     this.cancelRenderLoop();
-    if (this.scrollAnimationFrame) {
-      cancelAnimationFrame(this.scrollAnimationFrame);
-      this.scrollAnimationFrame = undefined;
-    }
+    this.stopScrollAnimation();
+    this.isDraggingScrollbar = false;
+    this.scrollbarDragY = null;
+    this.scrollbarDragRemainder = 0;
     if (this.scrollbarAnimationFrame) {
       cancelAnimationFrame(this.scrollbarAnimationFrame);
       this.scrollbarAnimationFrame = undefined;
@@ -1949,7 +2084,7 @@ export class Terminal implements ITerminalCore {
       // Rapid wheel packets accumulate against the pending destination, not
       // the lagging animated position (which would lose most of their input).
       const base = Math.floor(
-        this.scrollAnimationFrame !== undefined ? this.targetViewportY : this.viewportY
+        this.scrollAnimationStartTime !== undefined ? this.targetViewportY : this.viewportY
       );
       const total = this.wheelRemainder + deltaLines;
       if ((base <= 0 && total > 0) || (base >= limit && total < 0)) {
@@ -2009,10 +2144,15 @@ export class Terminal implements ITerminalCore {
 
       // Check if click is on thumb
       if (mouseY >= thumbY && mouseY <= thumbY + thumbHeight) {
-        // Start dragging thumb
+        // The thumb takes ownership from a wheel animation before recording any
+        // movement. Use client-space deltas and the live viewport, not a stale
+        // mousedown offset that output/pruning/resize can invalidate.
         this.isDraggingScrollbar = true;
-        this.scrollbarDragStart = mouseY;
-        this.scrollbarDragStartViewportY = this.viewportY;
+        this.scrollbarDragY = e.clientY;
+        this.scrollbarDragRemainder = 0;
+        this.cancelWheelScroll();
+        if (this.isDisposed || !this.isDraggingScrollbar) return;
+        this.showScrollbar(); // A held thumb must not keep a pre-drag hide timer.
 
         // Prevent text selection during drag
         if (this.canvas) {
@@ -2035,7 +2175,8 @@ export class Terminal implements ITerminalCore {
   private handleMouseUp = (): void => {
     if (this.isDraggingScrollbar) {
       this.isDraggingScrollbar = false;
-      this.scrollbarDragStart = null;
+      this.scrollbarDragY = null;
+      this.scrollbarDragRemainder = 0;
 
       // Restore text selection
       if (this.canvas) {
@@ -2054,40 +2195,42 @@ export class Terminal implements ITerminalCore {
    * Process scrollbar drag movement
    */
   private processScrollbarDrag(e: MouseEvent): void {
-    if (!this.canvas || !this.renderer || !this.wasmTerm || this.scrollbarDragStart === null)
-      return;
+    if (!this.canvas || !this.renderer || !this.wasmTerm || this.scrollbarDragY === null) return;
 
+    const deltaY = e.clientY - this.scrollbarDragY;
+    this.scrollbarDragY = e.clientY;
     const scrollbackLength = this.wasmTerm.getScrollbackLength();
-    if (scrollbackLength === 0) return;
+    const trackHeight = this.canvas.getBoundingClientRect().height - 8;
+    const thumbHeight = Math.max(20, (this.rows / (scrollbackLength + this.rows)) * trackHeight);
+    const travel = trackHeight - thumbHeight;
+    if (scrollbackLength === 0 || travel <= 0) {
+      this.scrollbarDragRemainder = 0;
+      return;
+    }
 
-    const rect = this.canvas.getBoundingClientRect();
-    const mouseY = e.clientY - rect.top;
-
-    // Calculate how much the mouse moved
-    const deltaY = mouseY - this.scrollbarDragStart;
-
-    // Convert mouse delta to viewport delta
-    // Use rect height which is already in CSS pixels
-    const canvasHeight = rect.height;
-    const scrollbarPadding = 4;
-    const scrollbarTrackHeight = canvasHeight - scrollbarPadding * 2;
-    const visibleRows = this.rows;
-    const totalLines = scrollbackLength + visibleRows;
-    const thumbHeight = Math.max(20, (visibleRows / totalLines) * scrollbarTrackHeight);
-
-    // Calculate scroll fraction from thumb movement
-    // Note: thumb moves in opposite direction to viewport (thumb down = scroll down = viewportY decreases)
-    const scrollFraction = -deltaY / (scrollbarTrackHeight - thumbHeight);
-    const viewportDelta = Math.round(scrollFraction * scrollbackLength);
-
-    const newViewportY = this.scrollbarDragStartViewportY + viewportDelta;
-    this.scrollToLine(Math.max(0, Math.min(scrollbackLength, newViewportY)));
+    // Another input may have started a wheel animation while the thumb is held.
+    // Settle it before applying pointer movement, never inherit its fraction.
+    this.cancelWheelScroll(false);
+    const base = Math.max(0, Math.min(scrollbackLength, Math.round(this.viewportY)));
+    const delta = this.scrollbarDragRemainder - (deltaY * scrollbackLength) / travel;
+    const whole = Math.round(delta);
+    const target = Math.max(0, Math.min(scrollbackLength, base + whole));
+    this.scrollbarDragRemainder = delta - whole;
+    // Don't accumulate movement beyond a boundary that must later be unwound.
+    if ((target === 0 && delta < 0) || (target === scrollbackLength && delta > 0)) {
+      this.scrollbarDragRemainder = 0;
+    }
+    // The base is read now: zero vertical motion keeps the result of output,
+    // history clearing, pruning or resize. Fractional pointer motion is retained
+    // separately, so interleaved writes cannot discard small drag movements.
+    this.scrollToLine(target);
   }
 
   /**
    * Show scrollbar with fade-in and schedule auto-hide
    */
   private showScrollbar(): void {
+    if (this.isDisposed) return;
     // Clear any existing hide timeout
     if (this.scrollbarHideTimeout) {
       window.clearTimeout(this.scrollbarHideTimeout);
@@ -2105,7 +2248,7 @@ export class Terminal implements ITerminalCore {
     }
 
     // Schedule auto-hide (unless dragging)
-    if (!this.isDraggingScrollbar) {
+    if (!this.isDisposed && !this.isDraggingScrollbar) {
       this.scrollbarHideTimeout = window.setTimeout(() => {
         this.hideScrollbar();
       }, this.SCROLLBAR_HIDE_DELAY_MS);
@@ -2116,6 +2259,7 @@ export class Terminal implements ITerminalCore {
    * Hide scrollbar with fade-out
    */
   private hideScrollbar(): void {
+    if (this.isDisposed) return;
     if (this.scrollbarHideTimeout) {
       window.clearTimeout(this.scrollbarHideTimeout);
       this.scrollbarHideTimeout = undefined;
@@ -2130,10 +2274,12 @@ export class Terminal implements ITerminalCore {
    * Fade in scrollbar
    */
   private fadeInScrollbar(): void {
+    if (this.isDisposed) return;
     if (this.scrollbarAnimationFrame) cancelAnimationFrame(this.scrollbarAnimationFrame);
     this.scrollbarAnimationFrame = undefined;
     const startTime = Date.now();
     const animate = () => {
+      if (this.isDisposed) return;
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / this.SCROLLBAR_FADE_DURATION_MS, 1);
       this.scrollbarOpacity = progress;
@@ -2143,6 +2289,7 @@ export class Terminal implements ITerminalCore {
         this.renderer.render(this.wasmTerm, false, this.viewportY, this, this.scrollbarOpacity);
       }
 
+      if (this.isDisposed) return;
       if (progress < 1) {
         this.scrollbarAnimationFrame = requestAnimationFrame(animate);
       } else {
@@ -2156,11 +2303,13 @@ export class Terminal implements ITerminalCore {
    * Fade out scrollbar
    */
   private fadeOutScrollbar(): void {
+    if (this.isDisposed) return;
     if (this.scrollbarAnimationFrame) cancelAnimationFrame(this.scrollbarAnimationFrame);
     this.scrollbarAnimationFrame = undefined;
     const startTime = Date.now();
     const startOpacity = this.scrollbarOpacity;
     const animate = () => {
+      if (this.isDisposed) return;
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / this.SCROLLBAR_FADE_DURATION_MS, 1);
       this.scrollbarOpacity = startOpacity * (1 - progress);
@@ -2170,6 +2319,7 @@ export class Terminal implements ITerminalCore {
         this.renderer.render(this.wasmTerm, false, this.viewportY, this, this.scrollbarOpacity);
       }
 
+      if (this.isDisposed) return;
       if (progress < 1) {
         this.scrollbarAnimationFrame = requestAnimationFrame(animate);
       } else {

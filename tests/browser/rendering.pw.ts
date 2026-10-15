@@ -23,6 +23,44 @@ async function backgroundOf(
 
 // --- Background colours (WEB-04 / RT-06: explicit black is not "default") ---
 
+rtest('color.bg-default-query-matches-canvas', async (ctx) => {
+  const cases = [
+    { theme: {}, color: '#1e1e1e' },
+    { theme: { foreground: '#123456' }, color: '#1e1e1e' },
+    { theme: { background: undefined }, color: '#1e1e1e' },
+    { theme: { background: 'red' }, color: '#ff0000' },
+    { theme: { background: 'rgba(1, 2, 3, 1)' }, color: '#010203' },
+    { theme: { background: 'hsl(120, 100%, 50%)' }, color: '#00ff00' },
+    { theme: { background: '#000000ff' }, color: '#000000' },
+  ];
+  for (const { theme, color } of cases) {
+    const term = await ctx.harness.create({ cols: 12, rows: 3, theme });
+    // Both constructor and runtime paths must use the same CSS resolution.
+    for (const runtime of [false, true]) {
+      if (runtime) {
+        await term.setOptions({ theme: { background: '#654321' } });
+        await term.setOptions({ theme });
+      }
+      await term.clearEvents();
+      await term.writeAndSettle(`\x1b]11;?\x1b\\${PARK_CURSOR}`);
+      const rgb = [1, 3, 5].map((i) => color.slice(i, i + 2).repeat(2)).join('/');
+      ctx.checks.equal(
+        'background-query',
+        (await term.events()).data.join(''),
+        `\x1b]11;rgb:${rgb}\x1b\\`
+      );
+      const { image, grid } = await term.capture();
+      await expectProbe(
+        ctx,
+        'default-bg-matches-query',
+        uniformColor(image, cellInterior(grid, 0, 1)),
+        color,
+        image
+      );
+    }
+  }
+});
+
 rtest('color.bg-default-uses-theme-background', async (ctx) => {
   const { color, image } = await backgroundOf(ctx, '0');
   await expectProbe(ctx, 'default-bg', color, THEME.background, image);

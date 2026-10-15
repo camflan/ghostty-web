@@ -32,6 +32,18 @@
       "unsupported": []
     },
     {
+      "id": "api.buffer-history-offsets",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
+      "id": "api.resize-clamps-history-viewport",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
       "id": "api.buffer-is-wrapped",
       "required": ["web-pinned", "web-candidate"],
       "gaps": [],
