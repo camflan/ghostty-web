@@ -93,9 +93,10 @@ export class Surface {
     }
     if (!notify) {
       // A compatibility field assignment is silent, not a deferred onScroll.
-      // A nested assignment also supersedes delivery of an obsolete outer value.
+      // Only its own movement supersedes pending notifications: a no-op must not
+      // swallow output/reflow changes still awaiting the outer write/resize commit.
       const offset = this.offset;
-      if (offset !== this.published) {
+      if (offset !== before) {
         this.published = offset;
         this.notification++;
       }

@@ -77,6 +77,42 @@ test('assigning viewportY is silent even across writes; actual history growth st
     expect(scrolls).toEqual([8]);
   }));
 
+for (const effect of ['bell', 'reply'] as const) {
+  test(`a silent no-op in a ${effect} listener preserves output-driven scroll notification`, () =>
+    session((term) => {
+      history(term);
+      term.scrollToLine(5);
+      const scrolls: number[] = [];
+      term.onScroll((offset) => scrolls.push(offset));
+      const assignCurrent = () => {
+        const current = term.viewportY;
+        term.viewportY = current;
+      };
+      if (effect === 'bell') term.onBell(assignCurrent);
+      else term.onData(assignCurrent);
+      term.write(`more\r\n${effect === 'bell' ? '\x07' : '\x1b[5n'}`);
+      expect(term.viewportY).toBe(6);
+      expect(scrolls).toEqual([6]);
+      term.write('x');
+      expect(scrolls).toEqual([6]);
+    }));
+}
+
+test('a silent no-op in a resize listener preserves reflow-driven scroll notification', () =>
+  session((term) => {
+    term.write('a long wrapped history line\r\n'.repeat(40));
+    term.scrollToLine(5);
+    const scrolls: number[] = [];
+    term.onScroll((offset) => scrolls.push(offset));
+    term.onResize(() => {
+      const current = term.viewportY;
+      term.viewportY = current;
+    });
+    term.resize(8, 4);
+    expect(term.viewportY).not.toBe(5); // Reflow must actually change the offset.
+    expect(scrolls).toEqual([term.viewportY]);
+  }));
+
 test('no-op input does not extend an existing scrollbar hide deadline', () =>
   session((term, opacity) => {
     history(term);

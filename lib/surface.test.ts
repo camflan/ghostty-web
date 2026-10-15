@@ -118,6 +118,18 @@ test('a nested silent offset invalidates stale outer notifications without emitt
   expect(late).toEqual([]);
 });
 
+test('a silent no-op leaves pending native movement for the outer commit to publish', () => {
+  const f = fixture();
+  f.surface.setOffset(5);
+  const seen: number[] = [];
+  f.events.event((offset) => seen.push(offset));
+  f.state.total++;
+  f.surface.setOffset(f.surface.offset, false);
+  expect(seen).toEqual([]);
+  f.surface.sync();
+  expect(seen).toEqual([6]);
+});
+
 test('a silent no-op does not cancel a current notification', () => {
   const f = fixture();
   const late: number[] = [];

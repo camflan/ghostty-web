@@ -227,3 +227,21 @@ Chromium checks**, formatting, lint, typecheck, native build and upstream trace 
 passed. No reviewed image, native source, WASM pin/hash or existing gap scope changed.
 The review also recorded pre-existing issues separately; they are not claimed fixed
 by this batch.
+
+The second four-lane review confirmed those fixes, including real Chromium input
+and pixel probes, and found an additional migration compatibility issue: assigning
+`term.viewportY` was only immediately silent, with a delayed `onScroll` on the next
+write/frame. Direct assignment now acknowledges its own movement without emitting;
+a nested silent move supersedes stale outer notifications. A follow-up probe caught
+and corrected a subtlety: a no-op assignment inside reply/bell/resize listeners must
+not acknowledge an unrelated output/reflow change still awaiting the outer commit.
+Four focused failing cases cover that distinction. Independent re-runs confirmed
+pending native events, silent actual movement, clamped no-ops and later polls behave
+as intended. Final validation passed **1,282 Bun tests**, the core matrix and the same
+**134 / 100 Chromium checks**, plus format/lint/types, trace validation and build.
+
+The reviews still identify pre-existing behavior outside this batch: disposal from
+a reset-time selection callback, failed-open retry, some scrollbar click/hit-test
+interactions, and a right-edge strip cleared while scrollbar opacity remains positive
+on a screen with no history. These are not reported as new migration regressions or
+as fixed. Firefox/WebKit, touch/pen and device-level parity remain unverified.
