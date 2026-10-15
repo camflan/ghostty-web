@@ -321,6 +321,7 @@ function resolveLayout(r: Resolver) {
       'ROWS',
       'CURSOR_X',
       'CURSOR_Y',
+      'CURSOR_VISIBLE',
       'ACTIVE_SCREEN',
       'MOUSE_TRACKING',
       'SCROLLBACK_ROWS',
@@ -336,9 +337,15 @@ function resolveLayout(r: Resolver) {
     scrollViewport: {
       size: r.size('GhosttyTerminalScrollViewport'),
       ...r.struct('GhosttyTerminalScrollViewport', { tag: 4, value: 16 }),
-      ...r.struct('GhosttyTerminalScrollViewportValue', { row: 4 }),
+      // wasm32: `intptr_t delta` and `size_t row` share the union's first 4 bytes.
+      ...r.struct('GhosttyTerminalScrollViewportValue', { delta: 4, row: 4 }),
     },
-    scrollViewportTag: r.enums('GhosttyTerminalScrollViewportTag', ['BOTTOM', 'ROW'] as const),
+    scrollViewportTag: r.enums('GhosttyTerminalScrollViewportTag', [
+      'TOP',
+      'BOTTOM',
+      'DELTA',
+      'ROW',
+    ] as const),
     scrollbar: {
       size: r.size('GhosttyTerminalScrollbar'),
       ...r.struct('GhosttyTerminalScrollbar', { total: 8, offset: 8, len: 8 }),

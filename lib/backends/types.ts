@@ -73,6 +73,71 @@ export interface ScreenSelection {
   end: ScreenPoint;
 }
 
+/**
+ * The active screen's native viewport position (libghostty-vt only): upstream
+ * `PageList.Scrollbar` (src/terminal/PageList.zig:3811-3879 @246f7028, read
+ * through GHOSTTY_TERMINAL_DATA_SCROLLBAR) plus which screen it belongs to and
+ * whether the viewport follows the active area (`PageList.viewport == .active`,
+ * GHOSTTY_TERMINAL_DATA_VIEWPORT_ACTIVE). Rows count from the oldest retained
+ * row: `offset` is the first visible row, `total - len` the first active row.
+ * Upstream has no change notification; poll once per frame or write batch and
+ * diff (include/ghostty/vt/terminal.h:2489-2505).
+ */
+export type NativeScrollState = {
+  screen: 'primary' | 'alternate';
+  total: number;
+  offset: number;
+  len: number;
+  following: boolean;
+};
+
+/**
+ * A native viewport command (libghostty-vt only), upstream
+ * `Terminal.ScrollViewport` (src/terminal/Terminal.zig:2809-2854 @246f7028):
+ * `top` = oldest retained row, `bottom` = follow the active area, `delta` =
+ * rows down (negative is up), `row` = absolute first visible row (the
+ * `NativeScrollState.offset` space). Native `PageList.scroll` clamps and
+ * decides whether the result follows the active area.
+ */
+export type NativeScrollCommand =
+  | { kind: 'top' | 'bottom' }
+  | { kind: 'delta'; rows: number }
+  | { kind: 'row'; row: number };
+
+/**
+ * Live renderer view of the visible native viewport (libghostty-vt only): the
+ * rows of upstream's RenderState (src/terminal/render.zig:511-609 @246f7028)
+ * for wherever the active screen's viewport currently is, in the renderer's
+ * read shape (`IRenderable` in lib/renderer.ts). One stable object per
+ * terminal; every read reflects the terminal now (refreshed lazily), and
+ * `getScrollState()` describes the same rows. Holds are not applied here:
+ * select a held frame with the facade's `getPresentation()` first.
+ */
+export interface NativeRenderView {
+  readonly backend: 'libghostty-vt';
+  getDimensions(): { cols: number; rows: number };
+  /** Same as the terminal's `getScrollState()`: the position of the rows below. */
+  getScrollState(): NativeScrollState;
+  /** Live history length (rows above the active area). */
+  getScrollbackLength(): number;
+  /** Copies of one visible row (viewport y), or null if out of range. */
+  getLine(y: number): GhosttyCell[] | null;
+  /**
+   * Viewport-relative cursor. `x/y` (= `viewportX/Y`) are viewport
+   * coordinates. When the cursor's row is not visible, `visible` is false,
+   * `viewportX/Y` are -1 and `x/y` keep the active-area position (never drawn).
+   */
+  getCursor(): RenderStateCursor;
+  /** Full grapheme cluster of a visible cell (' ' when empty). */
+  getGraphemeString(row: number, col: number): string;
+  /** Hyperlink URI of a visible cell, or null. */
+  getHyperlinkUri(row: number, col: number): string | null;
+  isRowDirty(y: number): boolean;
+  needsFullRedraw(): boolean;
+  /** Called by the renderer after painting this view (marks the render state clean). */
+  clearDirty(): void;
+}
+
 /** Identity of the engine behind a facade. */
 export type BackendKind = 'legacy' | 'libghostty-vt';
 
@@ -110,12 +175,20 @@ export interface TerminalBackend {
   /** Called at most once. */
   free(): void;
 
+  /**
+   * Render-state dirty tracking (`update`, `isRowDirty`, `markClean`) describes
+   * what the renderer shows: on libghostty-vt the visible native viewport.
+   */
   update(): DirtyState;
+  /** ACTIVE-screen cursor (logical visibility), whatever the viewport shows. */
   getCursor(): RenderStateCursor;
   getColors(): RenderStateColors;
   isRowDirty(y: number): boolean;
   markClean(): void;
-  /** Reusable row-major pool of `cols * rows` cells (do not retain across calls). */
+  /**
+   * Reusable row-major pool of the `cols * rows` ACTIVE-screen cells (do not
+   * retain across calls), whatever the viewport shows.
+   */
   getViewport(): GhosttyCell[];
 
   isAlternateScreen(): boolean;
@@ -124,6 +197,7 @@ export interface TerminalBackend {
 
   getScrollbackLength(): number;
   getScrollbackLine(offset: number): GhosttyCell[] | null;
+  /** Active-area rows/cells below (`row` = active y); history rows use the scrollback calls. */
   isRowWrapped(row: number): boolean;
   getHyperlinkUri(row: number, col: number): string | null;
   getScrollbackHyperlinkUri(offset: number, col: number): string | null;
@@ -134,7 +208,23 @@ export interface TerminalBackend {
   readResponse(): string | null;
 
   // ---- libghostty-vt only (absent on legacy) ----
-  /** Let native viewport tracking follow a write, updating the host offset even on error. */
+  /**
+   * Copies of one ACTIVE-screen row (active-area y), whatever the native
+   * viewport shows; null if out of range. Legacy: the facade slices `getViewport()`.
+   */
+  getLine?(y: number): GhosttyCell[] | null;
+  /** The active screen's native viewport position, read now. */
+  getScrollState?(): NativeScrollState;
+  /** Move the active screen's native viewport; it stays there until moved natively. */
+  scrollViewport?(command: NativeScrollCommand): void;
+  /** The stable live view of the visible native viewport. */
+  getRenderView?(): NativeRenderView;
+  /**
+   * @deprecated Pre-migration host compatibility only (`writeWithViewport`):
+   * pin `offset` rows above the bottom, write, report the resolved offset
+   * (even on error), then return the native viewport to the bottom. New hosts
+   * use `scrollViewport` and plain writes, which never move the viewport.
+   */
   preserveViewport?(offset: number, write: () => void, update: (offset: number) => void): void;
   /** Real cell metrics for size reports and the native pixel size. */
   setCellPixelSize?(widthPx: number, heightPx: number): void;

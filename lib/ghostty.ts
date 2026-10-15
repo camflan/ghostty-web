@@ -14,6 +14,9 @@ import type {
   KeyEncoderBackend,
   NativeHostEvent,
   NativeMouseEvent,
+  NativeRenderView,
+  NativeScrollCommand,
+  NativeScrollState,
   RawExports,
   ScreenPoint,
   ScreenSelection,
@@ -48,7 +51,15 @@ export {
   type RenderStateColors,
   type RenderStateCursor,
 };
-export type { BackendKind, GhosttyLoadOptions, ScreenPoint, ScreenSelection };
+export type {
+  BackendKind,
+  GhosttyLoadOptions,
+  NativeRenderView,
+  NativeScrollCommand,
+  NativeScrollState,
+  ScreenPoint,
+  ScreenSelection,
+};
 
 /** Exports accepted by the public constructors (legacy or libghostty-vt). */
 type BridgeExports = GhosttyWasmExports | RawExports;
@@ -279,7 +290,13 @@ export class KeyEncoder {
  *
  * Render reads follow the RenderState model: `update()` refreshes the render
  * snapshot (dirty state persists until `markClean()`), `getViewport()` returns
- * all visible cells at once.
+ * all active-screen cells at once.
+ *
+ * libghostty-vt: the native viewport is the one authority for which rows are
+ * visible (`getScrollState`, `scrollViewport`); `getRenderView()` reads those
+ * rows. `getLine`, `getViewport`, `getCursor`, `getGrapheme*`,
+ * `getHyperlinkUri` and `isRowWrapped` keep their active-screen meaning
+ * however the viewport is scrolled, and no read moves it.
  */
 export class GhosttyTerminal {
   private readonly impl: TerminalBackend;
@@ -288,6 +305,8 @@ export class GhosttyTerminal {
   private _rows: number;
   private freed = false;
   private pendingHighSurrogate = '';
+  /** Use-after-free-checked wrapper of the backend's render view (created on first use). */
+  private renderView: (IRenderable & NativeRenderView) | null = null;
   /** Active render hold seen last (0: none) and when it was first seen (see `getPresentation`). */
   private holdId = 0;
   private holdSince = 0;
@@ -360,7 +379,13 @@ export class GhosttyTerminal {
     this.noteRenderHold();
   }
 
-  /** @internal Native host write preserving the viewed content across parsing. */
+  /**
+   * @internal @deprecated Pre-migration native host only: pin the viewport
+   * `offset` rows above the bottom, write, report the native result (also on
+   * error), then return the viewport to the bottom. New hosts call
+   * `scrollViewport` and `write`; plain writes and reads never move the
+   * native viewport. Remove with its last caller.
+   */
   writeWithViewport(
     data: string | Uint8Array,
     offset: number,
@@ -369,6 +394,69 @@ export class GhosttyTerminal {
     this.assertLive();
     if (!this.impl.preserveViewport) throw nativeOnly(this.kind, 'writeWithViewport');
     this.impl.preserveViewport(offset, () => this.write(data), update);
+  }
+
+  // ==========================================================================
+  // Native viewport (libghostty-vt only)
+  // ==========================================================================
+
+  /**
+   * @internal libghostty-vt only: the active screen's native viewport, read
+   * now (upstream `PageList.scrollbar()` plus screen and following state).
+   * Poll once per frame or write batch and diff; there is no notification.
+   */
+  getScrollState(): NativeScrollState {
+    this.assertLive();
+    if (!this.impl.getScrollState) throw nativeOnly(this.kind, 'getScrollState');
+    return this.impl.getScrollState();
+  }
+
+  /**
+   * @internal libghostty-vt only: move the active screen's native viewport
+   * (upstream `Terminal.scrollViewport`). It then stays where native state
+   * puts it: output keeps a scrolled viewport on its content, pruning/ED3/RIS
+   * and reflow move it natively, and following resumes only when a command
+   * (or native clamping) returns it to the active area.
+   */
+  scrollViewport(command: NativeScrollCommand): void {
+    this.assertLive();
+    if (!this.impl.scrollViewport) throw nativeOnly(this.kind, 'scrollViewport');
+    this.impl.scrollViewport(command);
+  }
+
+  /**
+   * @internal libghostty-vt only: the stable live renderer view of the
+   * visible native viewport (rows, viewport-relative cursor, graphemes,
+   * hyperlinks, dirty tracking and the matching `getScrollState()`). Holds are
+   * not applied: choose `getPresentation()` first when following without a
+   * selection. Every method throws once the terminal is freed.
+   */
+  getRenderView(): IRenderable & NativeRenderView {
+    this.assertLive();
+    if (!this.impl.getRenderView) throw nativeOnly(this.kind, 'getRenderView');
+    if (!this.renderView) {
+      const view = this.impl.getRenderView();
+      const live = <A extends unknown[], R>(f: (...args: A) => R) => {
+        return (...args: A): R => {
+          this.assertLive();
+          return f(...args);
+        };
+      };
+      this.renderView = {
+        backend: 'libghostty-vt',
+        getDimensions: live(() => view.getDimensions()),
+        getScrollState: live(() => view.getScrollState()),
+        getScrollbackLength: live(() => view.getScrollbackLength()),
+        getLine: live((y: number) => view.getLine(y)),
+        getCursor: live(() => view.getCursor()),
+        getGraphemeString: live((row: number, col: number) => view.getGraphemeString(row, col)),
+        getHyperlinkUri: live((row: number, col: number) => view.getHyperlinkUri(row, col)),
+        isRowDirty: live((y: number) => view.isRowDirty(y)),
+        needsFullRedraw: live(() => view.needsFullRedraw()),
+        clearDirty: live(() => view.clearDirty()),
+      };
+    }
+    return this.renderView;
   }
 
   resize(cols: number, rows: number): void {
@@ -612,7 +700,11 @@ export class GhosttyTerminal {
     return this.impl.update();
   }
 
-  /** Cursor state (refreshes the render state first). */
+  /**
+   * Active-screen cursor (refreshes the render state first): active-area
+   * position and logical visibility, also while the native viewport is
+   * scrolled (the render view has the viewport-relative cursor).
+   */
   getCursor(): RenderStateCursor {
     this.assertLive();
     return this.impl.getCursor();
@@ -637,8 +729,8 @@ export class GhosttyTerminal {
   }
 
   /**
-   * All viewport cells, row-major. Returns a reusable pool: do not retain it
-   * across calls.
+   * All active-screen cells, row-major. Returns a reusable pool: do not retain
+   * it across calls.
    */
   getViewport(): GhosttyCell[] {
     this.assertLive();
@@ -649,10 +741,13 @@ export class GhosttyTerminal {
   // Compatibility methods (delegate to render state)
   // ==========================================================================
 
-  /** One viewport row as deep copies (safe to retain), or null if out of range. */
+  /** One active-screen row as deep copies (safe to retain), or null if out of range. */
   getLine(y: number): GhosttyCell[] | null {
     this.assertLive();
     if (y < 0 || y >= this._rows) return null;
+    // Native: the active row itself, whatever the viewport shows. Other values
+    // keep the historical slice behavior below.
+    if (this.impl.getLine && Number.isInteger(y)) return this.impl.getLine(y);
     this.update();
     const viewport = this.getViewport();
     const start = y * this._cols;

@@ -1,20 +1,28 @@
 /**
  * libghostty-vt engine: upstream Ghostty's public C API compiled to WASM.
  *
- * Rendering reads come from one upstream RenderState per terminal. The bridge
- * keeps a decoded JS copy of the viewport (the public `GhosttyCell` shape) and
- * refreshes it lazily: a write/resize only marks the copy stale, and the next
- * read (`update()`, `getLine()`, `getCursor()`, ...) runs one native
- * `ghostty_render_state_update` and re-decodes only the rows the render state
- * reports dirty (all rows on FULL or when default colors/palette changed).
- * Rows are read in bulk via `CELLS_RAW`; styles are fetched once per
- * (row, style_id) because style ids are page-local. Dirty state accumulates in
- * the render state until `markClean()` (ghostty_render_state_clean).
+ * The native viewport (upstream `PageList.viewport`, one per screen) is the
+ * only authority for what the active screen shows. `scrollViewport()` moves
+ * it; output, pruning, ED3/RIS, reflow and screen switches move it natively.
+ * Writes, resizes and reads never move it.
  *
- * History rows, wrap flags, graphemes and hyperlink URIs outside the decoded
- * viewport are read on demand through grid references (requires a build with
- * the default `grid_introspection` feature). Host writes temporarily use native
- * viewport tracking; render-state snapshots always read the live active area.
+ * Rendering reads come from one upstream RenderState per terminal, which
+ * always describes the VISIBLE viewport, wherever it is. The bridge keeps a
+ * decoded JS copy of it (the pool, public `GhosttyCell` shape) and refreshes
+ * it lazily: a write/resize/scroll only marks the copy stale, and the next
+ * read runs one native `ghostty_render_state_update` and re-decodes only the
+ * rows the render state reports dirty (all rows on FULL, e.g. after the
+ * viewport moved, or when default colors/palette changed). Rows are read in
+ * bulk via `CELLS_RAW`; styles are fetched once per (row, style_id) because
+ * style ids are page-local. Dirty state accumulates in the render state until
+ * `markClean()` (ghostty_render_state_clean). `getRenderView()` exposes it.
+ *
+ * Public reads (`getLine`, `getViewport`, `getCursor`, `getGrapheme`,
+ * `getHyperlinkUri`, `isRowWrapped`) keep their ACTIVE-screen meaning: from
+ * the pool while it shows the active area, otherwise straight from the
+ * terminal through ACTIVE grid references (cached until the next refresh).
+ * History rows are read through HISTORY grid references. Grid references
+ * require a build with the default `grid_introspection` feature.
  */
 import {
   CellFlags,
@@ -33,6 +41,9 @@ import type {
   KeyEncoderBackend,
   NativeHostEvent,
   NativeMouseEvent,
+  NativeRenderView,
+  NativeScrollCommand,
+  NativeScrollState,
   ScreenPoint,
   ScreenSelection,
   TerminalBackend,
@@ -111,7 +122,11 @@ interface HeldFrame {
   readonly cols: number;
   readonly rows: number;
   readonly scrollbackLength: number;
-  /** Live `cleanSeq` at capture: the dirty flags below are relative to that paint. */
+  /**
+   * Live `cleanSeq` at capture: the dirty flags below are relative to that
+   * paint. -1 when captured while the viewport showed other rows (the canvas
+   * never matches it, so presenting it repaints all and leaves live stale).
+   */
   readonly cleanSeq: number;
   dirty: DirtyState;
   readonly rowDirty: Uint8Array;
@@ -504,7 +519,7 @@ export class NativeTerminal implements TerminalBackend {
     cellHeight: number;
   } | null = null;
 
-  // ---- decoded viewport snapshot ----
+  // ---- decoded snapshot of the visible viewport (the render state) ----
   private stale = true;
   private decodeAll = true;
   private pool: GhosttyCell[] = [];
@@ -516,7 +531,8 @@ export class NativeTerminal implements TerminalBackend {
   private background = LEGACY_DEFAULT_BACKGROUND;
   private foreground = LEGACY_DEFAULT_FOREGROUND;
   private cursorColor: number | null = null;
-  private cursorState: RenderStateCursor = {
+  /** Viewport-relative cursor of the pool (the render view's cursor). */
+  private viewCursor: RenderStateCursor = {
     x: 0,
     y: 0,
     viewportX: -1,
@@ -525,6 +541,22 @@ export class NativeTerminal implements TerminalBackend {
     blinking: false,
     style: 'block',
   };
+  /** Active-screen cursor (public `getCursor`), logical visibility. */
+  private activeCursor: RenderStateCursor = { ...this.viewCursor };
+  /** The pool's rows are the active area (the viewport follows it or coincides with it). */
+  private poolActive = true;
+  private renderView: NativeRenderView | null = null;
+
+  // ---- active-screen rows while the viewport shows other rows ----
+  /**
+   * ACTIVE rows decoded through grid refs on demand, dropped at every refresh.
+   * A cached row is never mutated (held frames may share it).
+   */
+  private activeRows: (GhosttyCell[] | undefined)[] = [];
+  /** Clusters of `activeRows`, keyed by `y * cols + x`; replaced at every refresh. */
+  private activeClusters = new Map<number, number[]>();
+  /** Reusable copy returned by `getViewport()` while scrolled. */
+  private activePool: GhosttyCell[] = [];
 
   // ---- hyperlink identity: URI -> stable nonzero id ----
   /** URI -> id, least recently used first; bounded by `pruneLinkIds`. */
@@ -795,15 +827,23 @@ export class NativeTerminal implements TerminalBackend {
   // Render state
   // ==========================================================================
 
-  /** Live dirty state; FULL while the canvas may show an older held frame. */
+  /**
+   * Live dirty state of the visible viewport; FULL while the canvas may show
+   * an older held frame.
+   */
   update(): DirtyState {
     this.ensureFresh();
     return this.canvasCurrent ? this.dirty : DirtyState.FULL;
   }
 
+  /**
+   * ACTIVE-screen cursor: active-area position (and the position the bottom
+   * viewport reports), logical DECTCEM visibility, blink and style, whatever
+   * the viewport shows. The render view has the viewport-relative cursor.
+   */
   getCursor(): RenderStateCursor {
     this.ensureFresh();
-    return { ...this.cursorState };
+    return { ...this.activeCursor };
   }
 
   getColors(): RenderStateColors {
@@ -835,9 +875,74 @@ export class NativeTerminal implements TerminalBackend {
     this.canvasCurrent = true;
   }
 
+  /** ACTIVE-screen cells (reusable pool, not to be retained), whatever the viewport shows. */
   getViewport(): GhosttyCell[] {
     this.ensureFresh();
-    return this.pool;
+    if (this.poolActive) return this.pool;
+    // Copies: cached active rows may be shared with a held frame.
+    if (this.activePool.length !== this.cols * this.rows) {
+      this.activePool = Array.from({ length: this.cols * this.rows }, blankCell);
+    }
+    for (let y = 0; y < this.rows; y++) {
+      const row = this.activeRow(y);
+      for (let x = 0; x < this.cols; x++) Object.assign(this.activePool[y * this.cols + x], row[x]);
+    }
+    return this.activePool;
+  }
+
+  /** Copies of one ACTIVE-screen row (active-area y), or null if out of range. */
+  getLine(y: number): GhosttyCell[] | null {
+    if (!Number.isInteger(y) || y < 0 || y >= this.rows) return null;
+    this.ensureFresh();
+    if (!this.poolActive) return this.activeRow(y).map((cell) => ({ ...cell }));
+    const start = y * this.cols;
+    return this.pool.slice(start, start + this.cols).map((cell) => ({ ...cell }));
+  }
+
+  /**
+   * The stable live view of the visible viewport (see NativeRenderView). It
+   * reads the pool/render state and VIEWPORT grid refs; holds are the
+   * facade's business (`getPresentation`).
+   */
+  getRenderView(): NativeRenderView {
+    this.renderView ??= this.createRenderView();
+    return this.renderView;
+  }
+
+  private createRenderView(): NativeRenderView {
+    return {
+      backend: 'libghostty-vt',
+      getDimensions: () => ({ cols: this.cols, rows: this.rows }),
+      getScrollState: () => this.getScrollState(),
+      getScrollbackLength: () => this.getScrollbackLength(),
+      getLine: (y) => {
+        if (!Number.isInteger(y) || y < 0 || y >= this.rows) return null;
+        this.ensureFresh();
+        const start = y * this.cols;
+        return this.pool.slice(start, start + this.cols).map((cell) => ({ ...cell }));
+      },
+      getCursor: () => {
+        this.ensureFresh();
+        return { ...this.viewCursor };
+      },
+      getGraphemeString: (row, col) => {
+        if (!this.validActive(row, col)) return ' ';
+        this.ensureFresh();
+        const index = row * this.cols + col;
+        const cluster = this.clusters.get(index);
+        if (cluster) return String.fromCodePoint(...cluster);
+        const codepoint = this.pool[index].codepoint;
+        return codepoint ? String.fromCodePoint(codepoint) : ' ';
+      },
+      getHyperlinkUri: (row, col) => {
+        if (!this.validActive(row, col)) return null;
+        this.gridRef(this.L.pointTag.VIEWPORT, col, row);
+        return this.refUri() || null;
+      },
+      isRowDirty: (y) => this.isRowDirty(y),
+      needsFullRedraw: () => this.update() === DirtyState.FULL,
+      clearDirty: () => this.markClean(),
+    };
   }
 
   // ==========================================================================
@@ -1309,21 +1414,105 @@ export class NativeTerminal implements TerminalBackend {
   }
 
   // ==========================================================================
-  // History and on-demand cell data (grid references; never moves the viewport)
+  // Native viewport: the single authority for what the active screen shows
   // ==========================================================================
 
   /**
-   * Let upstream own the reading anchor while parsing: it distinguishes reset
-   * and ED3 from budget pruning at the exact byte that performs them. Tracked
-   * grid refs alone cannot do that after a clear followed by heavy output.
-   * The primary viewport can remain pinned while the alternate screen is active;
-   * read it back on every write so split and combined screen switches agree.
+   * Upstream `PageList.scrollbar()` (src/terminal/PageList.zig:3855-3879
+   * @246f7028, GHOSTTY_TERMINAL_DATA_SCROLLBAR) plus `viewport == .active`
+   * (VIEWPORT_ACTIVE) and the active screen, read now. Each screen keeps its
+   * own viewport natively; this is the active screen's. Never moves it.
+   */
+  getScrollState(): NativeScrollState {
+    const s = this.scratch!;
+    const S = this.L.scrollbar;
+    this.getData('SCROLLBAR', s.scrollbar);
+    const view = this.abi.view();
+    const total = Number(view.getBigUint64(s.scrollbar + S.total, true));
+    const offset = Number(view.getBigUint64(s.scrollbar + S.offset, true));
+    const len = Number(view.getBigUint64(s.scrollbar + S.len, true));
+    this.getData('VIEWPORT_ACTIVE', s.out);
+    const following = this.abi.bytes()[s.out] !== 0;
+    const screen = this.isAlternateScreen() ? 'alternate' : 'primary';
+    return { screen, total, offset, len, following };
+  }
+
+  /**
+   * Port of upstream `Terminal.scrollViewport` (src/terminal/Terminal.zig:
+   * 2846-2854 @246f7028) through `ghostty_terminal_scroll_viewport`. Native
+   * `PageList.scroll` (PageList.zig:3293-3507) clamps, chooses `.top`,
+   * `.active` (following) or a content pin; output, pruning, ED3/RIS, reflow
+   * and screen switches then move the viewport natively. The bridge never
+   * moves it back: writes, resizes and reads leave it where this put it.
+   *
+   * Upstream behavior kept as is: `row: 0`, like `top`, selects `.top` even
+   * without history, so later output does not follow (PageList.zig:3329-3340
+   * tests row 0 before the active area); `delta` prefers the active area.
+   */
+  scrollViewport(command: NativeScrollCommand): void {
+    const T = this.L.scrollViewportTag;
+    let tag: number;
+    let value = 0;
+    switch (command?.kind) {
+      case 'top':
+        tag = T.TOP;
+        break;
+      case 'bottom':
+        tag = T.BOTTOM;
+        break;
+      case 'delta': {
+        const rows = command.rows;
+        if (!Number.isInteger(rows)) {
+          throw new RangeError(`libghostty-vt: scroll delta must be an integer, got ${rows}`);
+        }
+        // wasm32 isize; beyond it the native clamp to top/active is the same.
+        value = Math.max(-0x80000000, Math.min(0x7fffffff, rows));
+        tag = T.DELTA;
+        break;
+      }
+      case 'row': {
+        const row = command.row;
+        if (!Number.isInteger(row) || row < 0) {
+          throw new RangeError(`libghostty-vt: scroll row must be an integer >= 0, got ${row}`);
+        }
+        // wasm32 usize; any row at or past the active area selects it natively.
+        value = Math.min(0xffffffff, row);
+        tag = T.ROW;
+        break;
+      }
+      default:
+        throw new RangeError(
+          `libghostty-vt: unknown scroll command ${String((command as { kind?: unknown })?.kind)}`
+        );
+    }
+    if (this.backend.writing) {
+      throw new Error('libghostty-vt: scrollViewport while a write is in progress');
+    }
+    const ptr = this.scratch!.scrollViewport;
+    const S = this.L.scrollViewport;
+    this.abi.bytes().fill(0, ptr, ptr + S.size);
+    const view = this.abi.view();
+    view.setInt32(ptr + S.tag, tag, true);
+    if (tag === T.DELTA) view.setInt32(ptr + S.value + S.delta, value, true);
+    else if (tag === T.ROW) view.setUint32(ptr + S.value + S.row, value, true);
+    this.abi.exports.ghostty_terminal_scroll_viewport(this.handle, ptr);
+    // The render state shows other rows now (a moved viewport is a FULL redraw).
+    this.stale = true;
+  }
+
+  /**
+   * @deprecated Pre-migration host compatibility only (`writeWithViewport`).
+   * Pins `offset` rows above the bottom of the primary screen, writes, reports
+   * the native result (also when the write threw: upstream distinguishes
+   * reset/ED3 from pruning at the exact byte), then returns the viewport to
+   * the bottom as that host expects. Nothing else parks the viewport; remove
+   * this (and `nativeViewport`) with its last caller.
    */
   preserveViewport(offset: number, write: () => void, update: (offset: number) => void): void {
     if (!this.isAlternateScreen()) {
       const history = this.getScrollbackLength();
       offset = Math.max(0, Math.min(history, Math.floor(offset)));
-      this.scrollNativeViewport(offset > 0 ? history - offset : null);
+      this.scrollViewport(offset > 0 ? { kind: 'row', row: history - offset } : { kind: 'bottom' });
     }
     try {
       write();
@@ -1331,40 +1520,21 @@ export class NativeTerminal implements TerminalBackend {
       try {
         update(this.isAlternateScreen() ? 0 : (this.nativeViewport()?.offset ?? 0));
       } finally {
-        // Public/live render snapshots must never accidentally show history.
-        this.scrollNativeViewport(null);
+        this.scrollViewport({ kind: 'bottom' });
       }
     }
   }
 
-  /** Native viewport state, in absolute screen rows and offset from the bottom. */
+  /** @deprecated With `preserveViewport`: null when following, else the first row and rows above the bottom. */
   private nativeViewport(): { row: number; offset: number } | null {
-    const s = this.scratch!;
-    this.getData('VIEWPORT_ACTIVE', s.out);
-    if (this.abi.bytes()[s.out]) return null;
-    this.getData('SCROLLBAR', s.scrollbar);
-    const S = this.L.scrollbar;
-    const view = this.abi.view();
-    const total = view.getBigUint64(s.scrollbar + S.total, true);
-    const row = view.getBigUint64(s.scrollbar + S.offset, true);
-    const len = view.getBigUint64(s.scrollbar + S.len, true);
-    return { row: Number(row), offset: Math.max(0, Number(total - len - row)) };
+    const state = this.getScrollState();
+    if (state.following) return null;
+    return { row: state.offset, offset: Math.max(0, state.total - state.len - state.offset) };
   }
 
-  /** `null` follows the live screen; otherwise pin an absolute screen row. */
-  private scrollNativeViewport(row: number | null): void {
-    const ptr = this.scratch!.scrollViewport;
-    const S = this.L.scrollViewport;
-    this.abi.bytes().fill(0, ptr, ptr + S.size);
-    const view = this.abi.view();
-    view.setInt32(
-      ptr + S.tag,
-      row === null ? this.L.scrollViewportTag.BOTTOM : this.L.scrollViewportTag.ROW,
-      true
-    );
-    if (row !== null) view.setUint32(ptr + S.value + S.row, row, true);
-    this.abi.exports.ghostty_terminal_scroll_viewport(this.handle, ptr);
-  }
+  // ==========================================================================
+  // History and on-demand cell data (grid references; never moves the viewport)
+  // ==========================================================================
 
   getScrollbackLength(): number {
     const s = this.scratch!;
@@ -1376,36 +1546,13 @@ export class NativeTerminal implements TerminalBackend {
     if (!this.validHistory(offset)) return null;
     // Default colors and palette come from the render state, as in the legacy engine.
     this.ensureFresh();
-    const ex = this.abi.exports;
-    const s = this.scratch!;
     const tag = this.L.pointTag.HISTORY;
+    const source = this.gridSource(tag, offset);
     const styles = new Map<number, ResolvedStyle>();
-    const source: CellSource = {
-      style: (x) => {
-        this.gridRef(tag, x, offset);
-        return this.readStyle((ptr) => ex.ghostty_grid_ref_style(s.gridRef, ptr) as number);
-      },
-      graphemes: (x) => {
-        this.gridRef(tag, x, offset);
-        return this.refGraphemes();
-      },
-      hyperlinkId: (x) => this.linkId(tag, x, offset),
-    };
     const cells: GhosttyCell[] = [];
     for (let x = 0; x < this.cols; x++) {
-      this.gridRef(tag, x, offset);
-      this.abi.check(ex.ghostty_grid_ref_cell(s.gridRef, s.out) as number, 'grid_ref_cell');
-      const view = this.abi.view();
       const cell = blankCell();
-      this.decodeCell(
-        view.getUint32(s.out, true),
-        view.getUint32(s.out + 4, true),
-        x,
-        cell,
-        styles,
-        source,
-        null
-      );
+      this.decodeGridCell(tag, x, offset, cell, styles, source, null, 0);
       cells.push(cell);
     }
     return cells;
@@ -1437,14 +1584,21 @@ export class NativeTerminal implements TerminalBackend {
     return this.refUri() || null;
   }
 
-  /** Full cluster (base codepoint first); empty when the cell holds no text. */
+  /** Full ACTIVE-screen cluster (base codepoint first); empty when the cell holds no text. */
   getGrapheme(row: number, col: number): number[] | null {
     if (!this.validActive(row, col)) return null;
     this.ensureFresh();
     const index = row * this.cols + col;
-    const cluster = this.clusters.get(index);
+    let cluster: number[] | undefined;
+    let codepoint: number;
+    if (this.poolActive) {
+      cluster = this.clusters.get(index);
+      codepoint = this.pool[index].codepoint;
+    } else {
+      codepoint = this.activeRow(row)[col].codepoint;
+      cluster = this.activeClusters.get(index);
+    }
     if (cluster) return [...cluster];
-    const codepoint = this.pool[index].codepoint;
     return codepoint ? [codepoint] : [];
   }
 
@@ -1599,23 +1753,60 @@ export class NativeTerminal implements TerminalBackend {
     if (cols !== this.cols || rows !== this.rows) return null;
     // The pool may be fresh as of an earlier point of this write: always update.
     this.refresh();
-    // Rows are shared with the live pool until decodeRow is about to change
-    // one (preserveHeldRow), so a hold costs nothing for rows it never sees change.
-    const frame: HeldFrame = {
-      id,
-      cols,
-      rows,
-      scrollbackLength: this.getScrollbackLength(),
-      cleanSeq: this.cleanSeq,
-      dirty: this.dirty,
-      rowDirty: this.rowDirty.slice(),
-      cursor: { ...this.cursorState },
-      ownRows: [],
-      clusters: new Map(),
-      view: undefined as unknown as HeldFrameView,
-    };
+    const frame: HeldFrame = this.poolActive
+      ? {
+          // Rows are shared with the live pool until decodeRow is about to
+          // change one (preserveHeldRow): a hold costs nothing for rows it
+          // never sees change, including when the viewport later scrolls.
+          id,
+          cols,
+          rows,
+          scrollbackLength: this.getScrollbackLength(),
+          cleanSeq: this.cleanSeq,
+          dirty: this.dirty,
+          rowDirty: this.rowDirty.slice(),
+          cursor: { ...this.activeCursor },
+          ownRows: [],
+          clusters: new Map(),
+          view: undefined as unknown as HeldFrameView,
+        }
+      : this.captureActiveFrame(id);
     frame.view = this.heldFrameView(frame);
     return frame;
+  }
+
+  /**
+   * A hold beginning while the viewport shows other rows still captures the
+   * ACTIVE frame the program drew (presented if the user returns to the
+   * bottom during the hold). Its rows come from ACTIVE grid refs and are
+   * owned by the frame, so the viewport is never moved for it. The canvas
+   * does not show these rows, so the frame starts FULL with cleanSeq -1.
+   */
+  private captureActiveFrame(id: number): HeldFrame {
+    const ownRows: GhosttyCell[][] = [];
+    const clusters = new Map<number, number[]>();
+    for (let y = 0; y < this.rows; y++) {
+      const row = this.activeRow(y);
+      ownRows[y] = row;
+      for (let x = 0; x < this.cols; x++) {
+        if (!row[x].grapheme_len) continue;
+        const cluster = this.activeClusters.get(y * this.cols + x);
+        if (cluster) clusters.set(y * this.cols + x, cluster);
+      }
+    }
+    return {
+      id,
+      cols: this.cols,
+      rows: this.rows,
+      scrollbackLength: this.getScrollbackLength(),
+      cleanSeq: -1,
+      dirty: DirtyState.FULL,
+      rowDirty: new Uint8Array(this.rows).fill(1),
+      cursor: { ...this.activeCursor },
+      ownRows,
+      clusters,
+      view: undefined as unknown as HeldFrameView,
+    };
   }
 
   /** Copy one live pool row (and its clusters) into a held frame before it changes. */
@@ -1857,26 +2048,23 @@ export class NativeTerminal implements TerminalBackend {
     if (this.stale) this.refresh();
   }
 
+  /**
+   * The per-frame RenderState update (upstream `RenderState.update`,
+   * src/terminal/render.zig:481-609 @246f7028, via
+   * `ghostty_render_state_update`): decode the rows and cursor of the VISIBLE
+   * viewport, wherever it is; the viewport is never moved for it (a hold
+   * capture inside vt_write included). Public active-screen reads use the
+   * result only while it shows the active area (`poolActive`).
+   */
   private refresh(): void {
-    // RENDER_HOLD can call this inside vt_write while native viewport tracking
-    // is pinned in history. Capture live rows/cursor instead, then restore the
-    // exact reading anchor before parsing resumes. This also protects direct
-    // low-level reads after a primary/alternate screen switch.
-    const viewport = this.nativeViewport();
-    if (viewport) this.scrollNativeViewport(null);
-    try {
-      this.refreshActive();
-    } finally {
-      if (viewport) this.scrollNativeViewport(viewport.row);
-    }
-  }
-
-  private refreshActive(): void {
     const abi = this.abi;
     const ex = abi.exports;
     const L = this.L;
     const s = this.scratch!;
     const rs = this.renderState;
+    // Whatever changed since, cached active rows may be out of date.
+    this.activeRows = [];
+    this.activeClusters = new Map();
     abi.check(ex.ghostty_render_state_update(rs, this.handle) as number, 'render_state_update');
 
     abi.check(ex.ghostty_render_state_get(rs, L.renderData.DIRTY, s.out) as number, 'DIRTY');
@@ -1905,28 +2093,54 @@ export class NativeTerminal implements TerminalBackend {
       ? this.readRgb(s.colors + C.cursor)
       : null;
 
-    // Cursor: active-area position plus render-state visibility and style.
+    // Which rows the render state shows: the active area when the viewport
+    // follows it or starts at its first row (e.g. `.top` without history).
+    const scroll = this.getScrollState();
+    this.poolActive = scroll.following || scroll.offset === scroll.total - scroll.len;
+
+    // Cursor. The render state has a viewport position only while the
+    // cursor's row is visible (render.zig:739-760); its visible/blinking are
+    // terminal modes (render.zig:606-609), not "on screen". The public cursor
+    // reads the terminal's own CURSOR_X/Y/VISIBLE (logical DECTCEM state).
     const K = L.cursor;
     abi.view().setUint32(s.cursor, K.size, true);
     abi.check(ex.ghostty_render_state_get(rs, L.renderData.CURSOR, s.cursor) as number, 'CURSOR');
     const view = abi.view();
     const inViewport = view.getUint8(s.cursor + K.viewport_has_value) !== 0;
+    const viewportX = inViewport ? view.getUint16(s.cursor + K.viewport_x, true) : -1;
+    const viewportY = inViewport ? view.getUint16(s.cursor + K.viewport_y, true) : -1;
+    const shown = view.getUint8(s.cursor + K.visible) !== 0;
+    const blinking = view.getUint8(s.cursor + K.blinking) !== 0;
     const visualStyle = view.getInt32(s.cursor + K.visual_style, true);
-    const cursor = this.cursorState;
-    cursor.viewportX = inViewport ? view.getUint16(s.cursor + K.viewport_x, true) : -1;
-    cursor.viewportY = inViewport ? view.getUint16(s.cursor + K.viewport_y, true) : -1;
-    cursor.visible = view.getUint8(s.cursor + K.visible) !== 0;
-    cursor.blinking = view.getUint8(s.cursor + K.blinking) !== 0;
-    cursor.style =
+    const style =
       visualStyle === L.cursorStyle.BAR
         ? 'bar'
         : visualStyle === L.cursorStyle.UNDERLINE
           ? 'underline'
           : 'block';
     this.getData('CURSOR_X', s.out);
-    cursor.x = abi.view().getUint16(s.out, true);
+    const x = abi.view().getUint16(s.out, true);
     this.getData('CURSOR_Y', s.out);
-    cursor.y = abi.view().getUint16(s.out, true);
+    const y = abi.view().getUint16(s.out, true);
+    this.getData('CURSOR_VISIBLE', s.out);
+    const visible = abi.bytes()[s.out] !== 0;
+    const viewCursor = this.viewCursor;
+    viewCursor.x = inViewport ? viewportX : x;
+    viewCursor.y = inViewport ? viewportY : y;
+    viewCursor.viewportX = viewportX;
+    viewCursor.viewportY = viewportY;
+    viewCursor.visible = shown && inViewport;
+    viewCursor.blinking = blinking;
+    viewCursor.style = style;
+    const activeCursor = this.activeCursor;
+    activeCursor.x = x;
+    activeCursor.y = y;
+    // What the bottom viewport reports: the cursor is always in the active area.
+    activeCursor.viewportX = this.poolActive ? viewportX : x;
+    activeCursor.viewportY = this.poolActive ? viewportY : y;
+    activeCursor.visible = visible;
+    activeCursor.blinking = blinking;
+    activeCursor.style = style;
 
     // Rows: decode only what the render state reports dirty.
     const all = this.decodeAll || colorsChanged || this.dirty === DirtyState.FULL;
@@ -1934,26 +2148,26 @@ export class NativeTerminal implements TerminalBackend {
       ex.ghostty_render_state_get(rs, L.renderData.ROW_ITERATOR, s.iterRef) as number,
       'ROW_ITERATOR'
     );
-    let y = 0;
+    let row = 0;
     while (ex.ghostty_render_state_row_iterator_next(this.rowIterator)) {
-      if (y >= this.rows)
+      if (row >= this.rows)
         throw new Error('libghostty-vt: render state has more rows than the terminal');
       abi.check(
         ex.ghostty_render_state_row_get(this.rowIterator, L.rowData.DIRTY, s.out) as number,
         'row DIRTY'
       );
       const rowDirty = abi.bytes()[s.out] !== 0;
-      this.rowDirty[y] = rowDirty ? 1 : 0;
-      if (all || rowDirty) this.decodeRow(y);
-      y++;
+      this.rowDirty[row] = rowDirty ? 1 : 0;
+      if (all || rowDirty) this.decodeRow(row);
+      row++;
     }
-    if (y !== this.rows) {
-      throw new Error(`libghostty-vt: render state has ${y} rows, terminal has ${this.rows}`);
+    if (row !== this.rows) {
+      throw new Error(`libghostty-vt: render state has ${row} rows, terminal has ${this.rows}`);
     }
     this.refreshSpacerHeads(all);
     if (this.deferLinkPruning) {
       this.deferLinkPruning = false;
-      if (this.linkIds.size > 3 * this.cols * this.rows + LINK_ID_SLACK) this.pruneLinkIds();
+      if (this.linkIds.size > this.linkIdLimit()) this.pruneLinkIds();
     }
     this.decodeAll = false;
     this.stale = false;
@@ -1965,52 +2179,106 @@ export class NativeTerminal implements TerminalBackend {
    * the character is overwritten on row y, without marking row y-1 dirty, so
    * the render state's copy of that row stays stale as well. For every row
    * decoded now (y or y-1) whose previous row still ends in a width-0 cell,
-   * re-read that one cell from the terminal (ACTIVE grid ref, not the render
-   * state) and mark the row dirty if it changed.
+   * re-read that one cell from the terminal (VIEWPORT grid ref, the rows the
+   * pool shows, not the render state) and mark the row dirty if it changed.
    */
   private refreshSpacerHeads(all: boolean): void {
     const x = this.cols - 1;
+    const tag = this.L.pointTag.VIEWPORT;
     let fresh: GhosttyCell | null = null;
     for (let y = 1; y < this.rows; y++) {
       if (!all && !this.rowDirty[y] && !this.rowDirty[y - 1]) continue;
       const index = (y - 1) * this.cols + x;
       if (this.pool[index].width !== 0) continue;
       fresh ??= blankCell();
-      this.decodeActiveCell(x, y - 1, fresh, null);
+      const source = this.gridSource(tag, y - 1);
+      this.decodeGridCell(tag, x, y - 1, fresh, new Map(), source, null, 0);
       if (sameCell(fresh, this.pool[index])) continue;
       // A held frame still sharing the row keeps the spacer it captured.
       if (this.heldFrame && !this.heldFrame.ownRows[y - 1]) {
         this.preserveHeldRow(this.heldFrame, y - 1);
       }
       this.clusters.delete(index);
-      this.decodeActiveCell(x, y - 1, this.pool[index], index);
+      this.decodeGridCell(tag, x, y - 1, this.pool[index], new Map(), source, this.clusters, index);
       this.rowDirty[y - 1] = 1;
       if (this.dirty === DirtyState.NONE) this.dirty = DirtyState.PARTIAL;
     }
   }
 
-  /** Decode one active-area cell straight from the terminal through grid refs. */
-  private decodeActiveCell(x: number, y: number, cell: GhosttyCell, clusterIndex: number | null) {
+  /** Readers for cells of one grid-ref row (`tag` row space, pre-validated). */
+  private gridSource(tag: number, y: number): CellSource {
     const ex = this.abi.exports;
     const s = this.scratch!;
-    const tag = this.L.pointTag.ACTIVE;
-    const source: CellSource = {
-      style: (cx) => {
-        this.gridRef(tag, cx, y);
+    return {
+      style: (x) => {
+        this.gridRef(tag, x, y);
         return this.readStyle((ptr) => ex.ghostty_grid_ref_style(s.gridRef, ptr) as number);
       },
-      graphemes: (cx) => {
-        this.gridRef(tag, cx, y);
+      graphemes: (x) => {
+        this.gridRef(tag, x, y);
         return this.refGraphemes();
       },
-      hyperlinkId: (cx) => this.linkId(tag, cx, y),
+      hyperlinkId: (x) => this.linkId(tag, x, y),
     };
+  }
+
+  /** Decode one cell straight from the terminal through a grid ref. */
+  private decodeGridCell(
+    tag: number,
+    x: number,
+    y: number,
+    cell: GhosttyCell,
+    styles: Map<number, ResolvedStyle>,
+    source: CellSource,
+    clusters: Map<number, number[]> | null,
+    clusterIndex: number
+  ): void {
+    const s = this.scratch!;
     this.gridRef(tag, x, y);
-    this.abi.check(ex.ghostty_grid_ref_cell(s.gridRef, s.out) as number, 'grid_ref_cell');
+    this.abi.check(
+      this.abi.exports.ghostty_grid_ref_cell(s.gridRef, s.out) as number,
+      'grid_ref_cell'
+    );
+    // Re-acquired: memory may have grown in the call above.
     const view = this.abi.view();
     const lo = view.getUint32(s.out, true);
     const hi = view.getUint32(s.out + 4, true);
-    this.decodeCell(lo, hi, x, cell, new Map(), source, clusterIndex);
+    this.decodeCell(lo, hi, x, cell, styles, source, clusters, clusterIndex);
+  }
+
+  /**
+   * One ACTIVE-screen row decoded straight from the terminal through ACTIVE
+   * grid refs (complete clusters, styles, widths, hyperlink ids), cached
+   * until the next refresh. For public reads while the viewport shows other
+   * rows; never moves the viewport. A cached row is never mutated.
+   */
+  private activeRow(y: number): GhosttyCell[] {
+    const cached = this.activeRows[y];
+    if (cached) return cached;
+    const tag = this.L.pointTag.ACTIVE;
+    const source = this.gridSource(tag, y);
+    const styles = new Map<number, ResolvedStyle>();
+    const row = Array.from({ length: this.cols }, blankCell);
+    // Registered first, so id pruning during the decode protects this row's links.
+    this.activeRows[y] = row;
+    try {
+      for (let x = 0; x < this.cols; x++) {
+        this.decodeGridCell(
+          tag,
+          x,
+          y,
+          row[x],
+          styles,
+          source,
+          this.activeClusters,
+          y * this.cols + x
+        );
+      }
+    } catch (error) {
+      this.activeRows[y] = undefined;
+      throw error;
+    }
+    return row;
   }
 
   private decodeRow(y: number): void {
@@ -2095,6 +2363,7 @@ export class NativeTerminal implements TerminalBackend {
         this.pool[base + x],
         styles,
         source,
+        this.clusters,
         base + x
       );
     }
@@ -2102,7 +2371,8 @@ export class NativeTerminal implements TerminalBackend {
 
   /**
    * Decode one packed cell into the public shape. `styles` caches styles by
-   * page-local style id and must be scoped to a single row.
+   * page-local style id and must be scoped to a single row. A full cluster
+   * (2+ codepoints) is stored in `clusters` at `clusterIndex`, if given.
    */
   private decodeCell(
     lo: number,
@@ -2111,7 +2381,8 @@ export class NativeTerminal implements TerminalBackend {
     cell: GhosttyCell,
     styles: Map<number, ResolvedStyle>,
     source: CellSource,
-    clusterIndex: number | null
+    clusters: Map<number, number[]> | null,
+    clusterIndex: number
   ): void {
     const L = this.L;
     const C = L.cell;
@@ -2135,7 +2406,7 @@ export class NativeTerminal implements TerminalBackend {
       const cluster = source.graphemes(x);
       if (cluster.length > 1) {
         graphemeLen = cluster.length - 1;
-        if (clusterIndex !== null) this.clusters.set(clusterIndex, cluster);
+        clusters?.set(clusterIndex, cluster);
       }
     } else if (tag === L.contentTag.BG_COLOR_PALETTE) {
       bg = this.paletteRgb(bitsOf(lo, hi, C.paletteIndex));
@@ -2327,12 +2598,7 @@ export class NativeTerminal implements TerminalBackend {
     if (!uri) return 0;
     let id = this.linkIds.get(uri);
     if (id === undefined) {
-      if (
-        !this.deferLinkPruning &&
-        this.linkIds.size >= 3 * this.cols * this.rows + LINK_ID_SLACK
-      ) {
-        this.pruneLinkIds();
-      }
+      if (!this.deferLinkPruning && this.linkIds.size >= this.linkIdLimit()) this.pruneLinkIds();
       id = ++this.nextLinkId;
     } else this.linkIds.delete(uri); // re-inserted below as most recently used
     this.linkIds.set(uri, id);
@@ -2340,10 +2606,22 @@ export class NativeTerminal implements TerminalBackend {
   }
 
   /**
-   * Evict the least recently used ids that no live pool cell and no cell of
-   * the held frame shows, keeping a screenful of others (plus slack) for
-   * history rows read recently, so links seen again soon (the renderer re-reads
-   * scrolled history every frame, a wrapped link spans rows) keep their ids.
+   * Id cache size that triggers pruning: a screenful each for the pool, the
+   * held frame and recently read history, plus one for cached active rows
+   * while the viewport shows other rows, plus slack. Keeps every pruning run
+   * evicting at least LINK_ID_SLACK / 2 ids.
+   */
+  private linkIdLimit(): number {
+    const screens = this.activeRows.length > 0 ? 4 : 3;
+    return screens * this.cols * this.rows + LINK_ID_SLACK;
+  }
+
+  /**
+   * Evict the least recently used ids that no live pool cell, no cached
+   * active row and no cell of the held frame shows, keeping a screenful of
+   * others (plus slack) for history rows read recently, so links seen again
+   * soon (the renderer re-reads scrolled history every frame, a wrapped link
+   * spans rows) keep their ids.
    * Each run evicts at least LINK_ID_SLACK / 2 ids, so its O(grid) cost is
    * amortized over that many new URIs.
    */
@@ -2354,6 +2632,7 @@ export class NativeTerminal implements TerminalBackend {
     };
     note(this.pool);
     for (const row of this.heldFrame?.ownRows ?? []) if (row) note(row);
+    for (const row of this.activeRows) if (row) note(row);
     let unused = 0;
     for (const id of this.linkIds.values()) if (!inUse.has(id)) unused++;
     let evict = unused - (this.cols * this.rows + LINK_ID_SLACK / 2);
