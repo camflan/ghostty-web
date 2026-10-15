@@ -1,0 +1,802 @@
+[
+  {
+    "id": "print.basic",
+    "description": "Printable ASCII advances the cursor",
+    "cols": 10,
+    "rows": 2,
+    "input": "hello",
+    "expectedLines": ["hello", ""],
+    "expectedCursor": {
+      "x": 5,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 graphic characters"
+    }
+  },
+  {
+    "id": "print.wraparound",
+    "description": "Autowrap at the right margin (DECAWM default on); last cell leaves a pending wrap",
+    "cols": 5,
+    "rows": 3,
+    "input": "helloworldabc12",
+    "expectedLines": ["hello", "world", "abc12"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 2
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: input with basic wraparound\""
+    }
+  },
+  {
+    "id": "print.wrap-then-char",
+    "description": "A character after a full row is printed on the next row",
+    "cols": 5,
+    "rows": 2,
+    "input": "abcdeX",
+    "expectedLines": ["abcde", "X"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "DEC STD 070 autowrap / pending wrap"
+    }
+  },
+  {
+    "id": "print.pending-wrap-cr",
+    "description": "CR clears the pending wrap without moving to the next row",
+    "cols": 5,
+    "rows": 2,
+    "input": "abcde\rX",
+    "expectedLines": ["Xbcde", ""],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "DEC STD 070 pending wrap reset by CR"
+    }
+  },
+  {
+    "id": "print.autowrap-off",
+    "description": "With DECAWM reset, characters at the right margin overwrite the last column",
+    "cols": 5,
+    "rows": 2,
+    "input": "\u001b[?7lABCDEFG",
+    "expectedLines": ["ABCDG", ""],
+    "expectedCursor": {
+      "x": 4,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "DECAWM (DEC private mode 7) reset"
+    }
+  },
+  {
+    "id": "print.unicode-single-width",
+    "description": "Non-ASCII single-width characters occupy one cell each",
+    "cols": 10,
+    "rows": 1,
+    "input": "héllo ωπ",
+    "expectedLines": ["héllo ωπ"],
+    "expectedCursor": {
+      "x": 8,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "UTF-8 decoding; East Asian Width narrow/ambiguous=1"
+    }
+  },
+  {
+    "id": "control.crlf",
+    "description": "CR LF moves to column 0 of the next row",
+    "cols": 10,
+    "rows": 2,
+    "input": "ab\r\ncd",
+    "expectedLines": ["ab", "cd"],
+    "expectedCursor": {
+      "x": 2,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: linefeed and carriage return\""
+    }
+  },
+  {
+    "id": "control.lf-keeps-column",
+    "description": "LF alone (LNM reset) keeps the column",
+    "cols": 10,
+    "rows": 2,
+    "input": "ab\ncd",
+    "expectedLines": ["ab", "  cd"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 LF with LNM reset"
+    }
+  },
+  {
+    "id": "control.cr-overwrite",
+    "description": "CR returns to column 0 and subsequent text overwrites",
+    "cols": 10,
+    "rows": 1,
+    "input": "abc\rX",
+    "expectedLines": ["Xbc"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 CR"
+    }
+  },
+  {
+    "id": "control.backspace",
+    "description": "BS moves left one column without erasing",
+    "cols": 10,
+    "rows": 1,
+    "input": "hello\by",
+    "expectedLines": ["helly"],
+    "expectedCursor": {
+      "x": 5,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: backspace\""
+    }
+  },
+  {
+    "id": "control.backspace-at-left-margin",
+    "description": "BS at column 0 does not move",
+    "cols": 10,
+    "rows": 1,
+    "input": "\b\ba",
+    "expectedLines": ["a"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 BS at left margin"
+    }
+  },
+  {
+    "id": "control.nul-bel-ignored",
+    "description": "NUL and BEL do not print",
+    "cols": 10,
+    "rows": 1,
+    "input": "a\u0000b\u0007c",
+    "expectedLines": ["abc"],
+    "expectedCursor": {
+      "x": 3,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 C0 NUL/BEL"
+    }
+  },
+  {
+    "id": "control.scroll-on-lf-at-bottom",
+    "description": "LF on the last row scrolls the screen up",
+    "cols": 5,
+    "rows": 2,
+    "input": "a\r\nb\r\nc",
+    "expectedLines": ["b", "c"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 LF at bottom margin scrolls"
+    }
+  },
+  {
+    "id": "tab.default-stops",
+    "description": "HT moves to the next default tab stop (every 8 columns)",
+    "cols": 20,
+    "rows": 1,
+    "input": "1\t2",
+    "expectedLines": ["1       2"],
+    "expectedCursor": {
+      "x": 9,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: horizontal tabs\""
+    }
+  },
+  {
+    "id": "tab.back",
+    "description": "CBT moves back by tab stops (from column 17: stops 16 then 8)",
+    "cols": 20,
+    "rows": 1,
+    "input": "\t\tX\u001b[2ZY",
+    "expectedLines": ["        Y       X"],
+    "expectedCursor": {
+      "x": 9,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: horizontal tabs back\""
+    }
+  },
+  {
+    "id": "tab.clear-all-and-set",
+    "description": "TBC 3 clears all stops; HTS sets one at the cursor",
+    "cols": 10,
+    "rows": 1,
+    "input": "\u001b[3g\u001b[4G\u001bH\r\tX",
+    "expectedLines": ["   X"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 TBC/HTS"
+    }
+  },
+  {
+    "id": "tab.no-stops-goes-to-margin",
+    "description": "With no tab stops HT moves to the right margin",
+    "cols": 10,
+    "rows": 1,
+    "input": "\u001b[3g\tX",
+    "expectedLines": ["         X"],
+    "expectedCursor": {
+      "x": 9,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 HT with no stops"
+    }
+  },
+  {
+    "id": "cursor.cup",
+    "description": "CUP positions the cursor (1-based)",
+    "cols": 5,
+    "rows": 3,
+    "input": "\u001b[2;3HX",
+    "expectedLines": ["", "  X", ""],
+    "expectedCursor": {
+      "x": 3,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: setCursorPos (original test)\""
+    }
+  },
+  {
+    "id": "cursor.cup-clamped",
+    "description": "CUP beyond the screen clamps to the last row/column",
+    "cols": 5,
+    "rows": 3,
+    "input": "\u001b[99;99HX",
+    "expectedLines": ["", "", "    X"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 2
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: cursorPos off the screen\""
+    }
+  },
+  {
+    "id": "cursor.relative-moves",
+    "description": "CUU/CUB/CUD/CUF relative movement",
+    "cols": 5,
+    "rows": 3,
+    "input": "\u001b[3;3H\u001b[AX\u001b[2D\u001b[BY\u001b[CZ",
+    "expectedLines": ["", "  X", " Y Z"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 2
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 CUU/CUD/CUF/CUB"
+    }
+  },
+  {
+    "id": "cursor.cha-vpa",
+    "description": "CHA sets the column, VPA sets the row",
+    "cols": 5,
+    "rows": 3,
+    "input": "\u001b[3GA\u001b[2dB",
+    "expectedLines": ["  A", "   B", ""],
+    "expectedCursor": {
+      "x": 4,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 CHA/VPA"
+    }
+  },
+  {
+    "id": "cursor.cnl-cpl",
+    "description": "CNL/CPL move to column 0 of the next/previous line",
+    "cols": 5,
+    "rows": 3,
+    "input": "ab\u001b[Ecd\u001b[Fef",
+    "expectedLines": ["ef", "cd", ""],
+    "expectedCursor": {
+      "x": 2,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 CNL/CPL"
+    }
+  },
+  {
+    "id": "cursor.decsc-decrc",
+    "description": "DECSC/DECRC save and restore the cursor position",
+    "cols": 5,
+    "rows": 3,
+    "input": "\u001b[2;3H\u001b7\u001b[HX\u001b8Y",
+    "expectedLines": ["X", "  Y", ""],
+    "expectedCursor": {
+      "x": 3,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "DEC DECSC/DECRC"
+    }
+  },
+  {
+    "id": "erase.el-right",
+    "description": "EL 0 erases from the cursor to the end of the line",
+    "cols": 5,
+    "rows": 2,
+    "input": "abcde\u001b[3G\u001b[K",
+    "expectedLines": ["ab", ""],
+    "expectedCursor": {
+      "x": 2,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 EL 0"
+    }
+  },
+  {
+    "id": "erase.el-left",
+    "description": "EL 1 erases from the start of the line through the cursor",
+    "cols": 5,
+    "rows": 2,
+    "input": "abcde\u001b[3G\u001b[1K",
+    "expectedLines": ["   de", ""],
+    "expectedCursor": {
+      "x": 2,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 EL 1"
+    }
+  },
+  {
+    "id": "erase.el-all",
+    "description": "EL 2 erases the whole line",
+    "cols": 5,
+    "rows": 2,
+    "input": "abcde\u001b[3G\u001b[2K",
+    "expectedLines": ["", ""],
+    "expectedCursor": {
+      "x": 2,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 EL 2"
+    }
+  },
+  {
+    "id": "erase.ed-below",
+    "description": "ED 0 erases from the cursor to the end of the screen",
+    "cols": 5,
+    "rows": 3,
+    "input": "aaa\r\nbbb\r\nccc\u001b[2;2H\u001b[J",
+    "expectedLines": ["aaa", "b", ""],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 ED 0"
+    }
+  },
+  {
+    "id": "erase.ed-above",
+    "description": "ED 1 erases from the start of the screen through the cursor",
+    "cols": 5,
+    "rows": 3,
+    "input": "aaa\r\nbbb\r\nccc\u001b[2;2H\u001b[1J",
+    "expectedLines": ["", "  b", "ccc"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 ED 1"
+    }
+  },
+  {
+    "id": "erase.ed-all",
+    "description": "ED 2 erases the screen without moving the cursor",
+    "cols": 5,
+    "rows": 3,
+    "input": "aaa\r\nbbb\r\nccc\u001b[2;2H\u001b[2J",
+    "expectedLines": ["", "", ""],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 ED 2"
+    }
+  },
+  {
+    "id": "erase.ech",
+    "description": "ECH erases characters without shifting",
+    "cols": 5,
+    "rows": 1,
+    "input": "ABCDE\u001b[2G\u001b[2X",
+    "expectedLines": ["A  DE"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 ECH"
+    }
+  },
+  {
+    "id": "edit.ich",
+    "description": "ICH inserts blanks at the cursor, shifting text right",
+    "cols": 5,
+    "rows": 1,
+    "input": "ABC\u001b[1G\u001b[2@X",
+    "expectedLines": ["X ABC"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: insertBlanks\""
+    }
+  },
+  {
+    "id": "edit.ich-pushes-off-margin",
+    "description": "ICH discards characters shifted past the right margin",
+    "cols": 5,
+    "rows": 1,
+    "input": "ABCDE\u001b[1G\u001b[2@",
+    "expectedLines": ["  ABC"],
+    "expectedCursor": {
+      "x": 0,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: insertBlanks pushes off end\""
+    }
+  },
+  {
+    "id": "edit.dch",
+    "description": "DCH deletes characters, shifting text left",
+    "cols": 5,
+    "rows": 1,
+    "input": "ABCDE\u001b[2G\u001b[2P",
+    "expectedLines": ["ADE"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 DCH"
+    }
+  },
+  {
+    "id": "edit.irm",
+    "description": "IRM (ANSI mode 4) inserts printed characters",
+    "cols": 5,
+    "rows": 1,
+    "input": "ABC\u001b[1G\u001b[4hX",
+    "expectedLines": ["XABC"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 IRM"
+    }
+  },
+  {
+    "id": "edit.il",
+    "description": "IL inserts a blank line at the cursor row",
+    "cols": 5,
+    "rows": 3,
+    "input": "A\r\nB\r\nC\u001b[2;1H\u001b[L",
+    "expectedLines": ["A", "", "B"],
+    "expectedCursor": {
+      "x": 0,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: insertLines simple\""
+    }
+  },
+  {
+    "id": "edit.dl",
+    "description": "DL deletes the cursor row and pulls lines up",
+    "cols": 5,
+    "rows": 3,
+    "input": "A\r\nB\r\nC\u001b[1;1H\u001b[M",
+    "expectedLines": ["B", "C", ""],
+    "expectedCursor": {
+      "x": 0,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 DL"
+    }
+  },
+  {
+    "id": "edit.rep",
+    "description": "REP repeats the preceding graphic character",
+    "cols": 10,
+    "rows": 1,
+    "input": "a\u001b[3b",
+    "expectedLines": ["aaaa"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 REP"
+    }
+  },
+  {
+    "id": "scroll.su",
+    "description": "SU scrolls the screen up",
+    "cols": 5,
+    "rows": 3,
+    "input": "A\r\nB\r\nC\u001b[S",
+    "expectedLines": ["B", "C", ""],
+    "expectedCursor": {
+      "x": 1,
+      "y": 2
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: scrollUp simple\""
+    }
+  },
+  {
+    "id": "scroll.sd",
+    "description": "SD scrolls the screen down",
+    "cols": 5,
+    "rows": 3,
+    "input": "A\r\nB\r\nC\u001b[T",
+    "expectedLines": ["", "A", "B"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 2
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: scrollDown simple\""
+    }
+  },
+  {
+    "id": "scroll.decstbm-region",
+    "description": "LF at the bottom of a DECSTBM region scrolls only the region",
+    "cols": 5,
+    "rows": 3,
+    "input": "\u001b[3;1HZ\u001b[1;2rA\r\nB\r\nC",
+    "expectedLines": ["B", "C", "Z"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: setTopAndBottomMargin simple\""
+    }
+  },
+  {
+    "id": "scroll.ri-at-top",
+    "description": "RI at the top margin scrolls the screen down",
+    "cols": 5,
+    "rows": 3,
+    "input": "A\r\nB\u001b[H\u001bM",
+    "expectedLines": ["", "A", "B"],
+    "expectedCursor": {
+      "x": 0,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "DEC RI"
+    }
+  },
+  {
+    "id": "scroll.ind-nel",
+    "description": "IND moves down keeping the column; NEL moves to the next line start",
+    "cols": 5,
+    "rows": 3,
+    "input": "A\u001bDB\u001bEC",
+    "expectedLines": ["A", " B", "C"],
+    "expectedCursor": {
+      "x": 1,
+      "y": 2
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 IND/NEL"
+    }
+  },
+  {
+    "id": "mode.origin",
+    "description": "DECOM makes CUP relative to the scroll region",
+    "cols": 5,
+    "rows": 4,
+    "input": "\u001b[2;3r\u001b[?6h\u001b[1;1HX",
+    "expectedLines": ["", "X", "", ""],
+    "expectedCursor": {
+      "x": 1,
+      "y": 1
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: cursorPos relative to origin\""
+    }
+  },
+  {
+    "id": "esc.decaln",
+    "description": "DECALN fills the screen with E and homes the cursor",
+    "cols": 3,
+    "rows": 2,
+    "input": "\u001b#8",
+    "expectedLines": ["EEE", "EEE"],
+    "expectedCursor": {
+      "x": 0,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "upstream-test",
+      "reference": "ghostty 5714ed07 src/terminal/Terminal.zig test \"Terminal: DECALN\""
+    }
+  },
+  {
+    "id": "charset.dec-special-graphics",
+    "description": "G0 DEC special graphics maps q/x to box drawing; ESC ( B restores ASCII",
+    "cols": 10,
+    "rows": 1,
+    "input": "\u001b(0qx\u001b(Bq",
+    "expectedLines": ["─│q"],
+    "expectedCursor": {
+      "x": 3,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "DEC Special Graphics (VT100)"
+    }
+  },
+  {
+    "id": "screen.alt-enter",
+    "description": "Mode 1049 switches to a cleared alternate screen keeping the cursor",
+    "cols": 10,
+    "rows": 2,
+    "input": "main\u001b[?1049halt",
+    "expectedLines": ["    alt", ""],
+    "expectedCursor": {
+      "x": 7,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "xterm private mode 1049"
+    }
+  },
+  {
+    "id": "screen.alt-exit",
+    "description": "Leaving mode 1049 restores the primary screen and cursor",
+    "cols": 10,
+    "rows": 2,
+    "input": "main\u001b[?1049halt\u001b[?1049l",
+    "expectedLines": ["main", ""],
+    "expectedCursor": {
+      "x": 4,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "xterm private mode 1049"
+    }
+  },
+  {
+    "id": "sgr.does-not-print",
+    "description": "SGR sequences change attributes only",
+    "cols": 10,
+    "rows": 1,
+    "input": "\u001b[1;31mred\u001b[0m!",
+    "expectedLines": ["red!"],
+    "expectedCursor": {
+      "x": 4,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "ECMA-48 SGR"
+    }
+  },
+  {
+    "id": "osc.does-not-print",
+    "description": "OSC title payloads are not printed (BEL and ST terminators)",
+    "cols": 10,
+    "rows": 1,
+    "input": "\u001b]2;title\u0007X\u001b]0;t2\u001b\\Y",
+    "expectedLines": ["XY"],
+    "expectedCursor": {
+      "x": 2,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "spec",
+      "reference": "xterm OSC 0/2"
+    }
+  },
+  {
+    "id": "csi.unknown-private-mode-ignored",
+    "description": "Unknown DEC private modes are consumed silently",
+    "cols": 10,
+    "rows": 1,
+    "input": "A\u001b[?1234hB",
+    "expectedLines": ["AB"],
+    "expectedCursor": {
+      "x": 2,
+      "y": 0
+    },
+    "provenance": {
+      "kind": "invariant",
+      "reference": "Unknown sequences must not print"
+    }
+  }
+]
