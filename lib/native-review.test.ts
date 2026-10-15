@@ -202,7 +202,7 @@ describe('wrapped wide character spacer head', () => {
   });
 });
 
-test('native viewport is restored and resolved after a partially completed write throws', () => {
+test('native viewport remains authoritative after a partially completed write throws', () => {
   let failWrite = false;
   const ghostty = new Ghostty(
     instance((ex) => {
@@ -216,28 +216,26 @@ test('native viewport is restored and resolved after a partially completed write
   const term = ghostty.createTerminal(80, 4, { scrollbackLimit: 1000 });
   try {
     term.write(Array.from({ length: 30 }, (_, i) => `line ${i}\r\n`).join(''));
-    let offset = 10;
+    term.scrollViewport({ kind: 'delta', rows: -10 });
+    const anchor = term.getScrollState().offset;
     failWrite = true;
-    expect(() =>
-      term.writeWithViewport('more\r\n', offset, (next) => {
-        offset = next;
-      })
-    ).toThrow('injected write failure');
-    expect(offset).toBe(11);
-    expect(impl(term).nativeViewport()).toBeNull();
-    expect(
-      term
-        .getLine(0)!
+    expect(() => term.write('more\r\n')).toThrow('injected write failure');
+    let state = term.getScrollState();
+    expect(state.following).toBe(false);
+    expect(state.offset).toBe(anchor);
+    expect(state.total - state.len - state.offset).toBe(11);
+    const text = (line: ReturnType<typeof term.getLine>) =>
+      line!
         .slice(0, 7)
         .map((cell) => String.fromCodePoint(cell.codepoint))
-        .join('')
-    ).toBe('line 28');
+        .join('');
+    expect(text(term.getLine(0))).toBe('line 28');
+    expect(text(term.getRenderView().getLine(0))).toBe('line 17');
     failWrite = false;
-    term.writeWithViewport('more\r\n', offset, (next) => {
-      offset = next;
-    });
-    expect(offset).toBe(12);
-    expect(impl(term).nativeViewport()).toBeNull();
+    term.write('more\r\n');
+    state = term.getScrollState();
+    expect(state.offset).toBe(anchor);
+    expect(state.total - state.len - state.offset).toBe(12);
   } finally {
     term.free();
   }

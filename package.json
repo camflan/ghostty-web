@@ -69,6 +69,7 @@
     "test:regression:container": "bash scripts/test-browser-container.sh",
     "test:regression:scenes:candidates": "bash scripts/test-browser-container.sh --candidates",
     "dev:regression": "vite --host 127.0.0.1 --port 4173 --strictPort",
+    "check:upstream-trace": "bun scripts/check-upstream-trace.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.regression.json",
     "fmt": "prettier --check .",
     "fmt:fix": "prettier --write --cache .",

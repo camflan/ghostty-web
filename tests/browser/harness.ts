@@ -266,20 +266,18 @@ const api: HarnessApi = {
   },
 
   park(id) {
-    const term = get(id).term as unknown as {
-      cancelRenderLoop(): void;
-      animationFrameId?: number;
-    };
+    const term = get(id).term as unknown as { cancelRenderLoop(): void };
     term.cancelRenderLoop();
-    // startRenderLoop() returns early while an id is set; resize() clears it.
-    term.animationFrameId = -1;
   },
 
   render(id, force, viewportY) {
     const entry = get(id);
     const term = entry.term;
     if (!term.wasmTerm) fail('NOT_OPEN', 'terminal has no WASM terminal');
-    renderer(entry).render(term.wasmTerm, force, viewportY ?? term.getViewportY(), term, 0);
+    // A forced view must move the authoritative viewport, not ask the renderer
+    // to stitch a second history view independently of native state.
+    if (viewportY !== undefined) term.viewportY = viewportY;
+    renderer(entry).render(term.wasmTerm, force, term.getViewportY(), term, 0);
   },
 
   capture(id): Capture {
@@ -590,15 +588,11 @@ const api: HarnessApi = {
   },
 
   scrollbarState(id) {
-    // Test-only reach-in; fails loudly if the private fields disappear.
-    const term = get(id).term as unknown as {
-      scrollbarOpacity?: unknown;
-      scrollbarVisible?: unknown;
-    };
-    if (typeof term.scrollbarOpacity !== 'number' || typeof term.scrollbarVisible !== 'boolean') {
-      fail('NO_CAPABILITY', 'scrollbar-state: private scrollbar fields not found');
-    }
-    return { opacity: term.scrollbarOpacity, visible: term.scrollbarVisible };
+    // Test-only adapter boundary; no duplicate private visibility state on Terminal.
+    const term = get(id).term as unknown as { scrollbar?: { getOpacity(): number } };
+    if (!term.scrollbar) fail('NO_CAPABILITY', 'scrollbar-state: browser adapter not found');
+    const opacity = term.scrollbar.getOpacity();
+    return { opacity, visible: opacity > 0 };
   },
 };
 

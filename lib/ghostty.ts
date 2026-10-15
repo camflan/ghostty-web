@@ -379,23 +379,6 @@ export class GhosttyTerminal {
     this.noteRenderHold();
   }
 
-  /**
-   * @internal @deprecated Pre-migration native host only: pin the viewport
-   * `offset` rows above the bottom, write, report the native result (also on
-   * error), then return the viewport to the bottom. New hosts call
-   * `scrollViewport` and `write`; plain writes and reads never move the
-   * native viewport. Remove with its last caller.
-   */
-  writeWithViewport(
-    data: string | Uint8Array,
-    offset: number,
-    update: (offset: number) => void
-  ): void {
-    this.assertLive();
-    if (!this.impl.preserveViewport) throw nativeOnly(this.kind, 'writeWithViewport');
-    this.impl.preserveViewport(offset, () => this.write(data), update);
-  }
-
   // ==========================================================================
   // Native viewport (libghostty-vt only)
   // ==========================================================================

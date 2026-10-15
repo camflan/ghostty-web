@@ -26,7 +26,8 @@ export interface ITerminalOptions {
   disableStdin?: boolean; // Disable keyboard input (default: false)
 
   // Scrolling options
-  smoothScrollDuration?: number; // Duration in ms for smooth scroll animation (default: 100, 0 = instant)
+  /** @deprecated Logical scrolling now follows Ghostty immediately. Retained for source compatibility; no easing is applied. */
+  smoothScrollDuration?: number;
 
   // Internal: Ghostty WASM instance (optional, for test isolation)
   // If not provided, uses the module-level instance from init()

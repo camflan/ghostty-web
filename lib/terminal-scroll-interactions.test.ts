@@ -3,9 +3,8 @@ import type { Terminal } from './terminal';
 import { createIsolatedTerminal } from './test-helpers';
 
 type Control = {
-  scrollAnimationFrame?: number;
-  scrollbarAnimationFrame?: number;
-  scrollbarHideTimeout?: number;
+  rendererThread?: { running: boolean };
+  scrollbar?: { getOpacity(): number; isDragging: boolean };
 };
 
 async function session(body: (term: Terminal, canvas: HTMLCanvasElement, rect: DOMRect) => void) {
@@ -26,12 +25,6 @@ async function session(body: (term: Terminal, canvas: HTMLCanvasElement, rect: D
     body(term, canvas, rect);
   } finally {
     term.dispose();
-    // A failing disposal regression must not leak its deliberately exposed handles.
-    const ctl = term as unknown as Control;
-    if (ctl.scrollbarHideTimeout !== undefined) window.clearTimeout(ctl.scrollbarHideTimeout);
-    for (const id of [ctl.scrollAnimationFrame, ctl.scrollbarAnimationFrame]) {
-      if (id !== undefined) cancelAnimationFrame(id);
-    }
     host.remove();
   }
 }
@@ -91,7 +84,7 @@ test('a horizontal-only thumb movement after output preserves the reading anchor
     term.scrollLines(-20);
     const before = topText(term);
     const pointer = drag(term, canvas, rect);
-    expect((term as unknown as Control).scrollbarHideTimeout).toBeUndefined();
+    expect((term as unknown as Control).scrollbar!.isDragging).toBe(true);
     term.write('new\r\n'.repeat(5));
     expect(term.viewportY).toBe(25);
     expect(topText(term)).toBe(before);
@@ -170,7 +163,7 @@ test('fractional pointer motion accumulates across interleaved output', async ()
   });
 });
 
-test('taking the thumb settles wheel intent before recording whole-row drag motion', async () => {
+test('taking the thumb after native wheel input preserves whole-row drag motion', async () => {
   await session((term, canvas, rect) => {
     term.options.smoothScrollDuration = 100;
     const scrolls: number[] = [];
@@ -178,14 +171,14 @@ test('taking the thumb settles wheel intent before recording whole-row drag moti
     canvas.dispatchEvent(
       new WheelEvent('wheel', { deltaY: -3, deltaMode: 1, bubbles: true, cancelable: true })
     );
-    expect(Number.isInteger(term.viewportY)).toBe(false);
+    expect(term.viewportY).toBe(3); // native wheel commands commit immediately
     const pointer = drag(term, canvas, rect);
     expect(term.viewportY).toBe(3);
     pointer.rows(4);
     pointer.up();
     expect(term.viewportY).toBe(7);
     expect(scrolls.every(Number.isInteger)).toBe(true);
-    expect((term as unknown as Control).scrollAnimationFrame).toBeUndefined();
+    expect(Number.isInteger(term.viewportY)).toBe(true);
   });
 });
 
@@ -203,9 +196,8 @@ for (const action of ['top', 'bottom', 'lines', 'line', 'instant-wheel'] as cons
           new WheelEvent('wheel', { deltaY: -3, deltaMode: 1, bubbles: true, cancelable: true })
         );
       const ctl = term as unknown as Control;
-      expect(ctl.scrollbarHideTimeout).toBeUndefined();
-      expect(ctl.scrollbarAnimationFrame).toBeUndefined();
-      expect(ctl.scrollAnimationFrame).toBeUndefined();
+      expect(ctl.rendererThread?.running ?? false).toBe(false);
+      expect(ctl.scrollbar?.getOpacity() ?? 0).toBe(0);
     });
   });
 }

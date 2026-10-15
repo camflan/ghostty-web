@@ -101,12 +101,15 @@ continues to follow new output. Typing, pasting, or `input(data, true)` resumes
 following before the input is sent; modifier/release and pointer reports do not.
 `scrollToBottom()` also resumes following explicitly. Fractional wheel input survives
 interleaved output. Thumb dragging also preserves the current reading anchor across
-output, pruning and resize; taking the thumb settles pending wheel input to whole
-rows. Smooth scrolling uses elapsed-time easing, with the configured duration
-independent of frame rate (the existing instant behavior for durations at or below
-`1000 / 60` ms is retained). Ghostty owns reset/clear and per-screen reading positions, so
-splitting a stream into different writes cannot change those decisions. The archived
-legacy backend retains its jump-to-bottom policy.
+output, pruning and resize. Logical scrolling is now immediate and whole-row,
+matching Ghostty's host policy. **`smoothScrollDuration` is deprecated:** it remains
+accepted for source compatibility but no longer adds time-based easing on either
+backend. Fractional assignments to `term.viewportY` are floored to a whole row.
+Ghostty continuously owns the native viewport, including reset/clear, reflow and
+per-screen reading positions; the host no longer parks it at the bottom after
+writes or reconstructs the visible screen. The archived legacy backend retains its
+jump-to-bottom-on-output policy. See [host architecture](./docs/upstream-host-architecture.md)
+for ownership, intentional browser adaptations and validation limits.
 
 String writes can split a UTF-16 surrogate pair across chunks. Empty chunks preserve
 the pending half; a nonempty byte write flushes an unmatched half as U+FFFD before

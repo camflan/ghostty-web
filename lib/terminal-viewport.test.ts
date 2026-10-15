@@ -36,7 +36,11 @@ const history = (term: Terminal) => {
 
 /** Deterministic frames, restored even when an assertion fails. No global test leakage. */
 async function withFrames(
-  body: (flush: (ticks?: number) => void, time: () => number) => Promise<void>,
+  body: (
+    flush: (ticks?: number) => void,
+    time: () => number,
+    pending: () => number
+  ) => Promise<void>,
   frameMs = 1000 / 60
 ): Promise<void> {
   const nowDescriptor = Object.getOwnPropertyDescriptor(performance, 'now');
@@ -65,7 +69,11 @@ async function withFrames(
     }
   };
   try {
-    await body(flush, () => clock);
+    await body(
+      flush,
+      () => clock,
+      () => frames.size
+    );
   } finally {
     if (nowDescriptor) Object.defineProperty(performance, 'now', nowDescriptor);
     else Reflect.deleteProperty(performance, 'now');
@@ -76,7 +84,7 @@ async function withFrames(
 }
 
 for (const action of ['line', 'relative', 'top', 'bottom', 'write'] as const) {
-  test(`reentrant ${action} from the first wheel step cannot strand animation ownership`, async () => {
+  test(`reentrant ${action} during immediate native wheel input cannot overwrite newer navigation`, async () => {
     await withFrames(async (flush) => {
       await session(({ term, wheel }) => {
         history(term);
@@ -103,7 +111,7 @@ for (const action of ['line', 'relative', 'top', 'bottom', 'write'] as const) {
                   ? 0
                   : 5;
         expect(term.viewportY).toBe(expected);
-        expect((term as unknown as { targetViewportY: number }).targetViewportY).toBe(expected);
+        expect(term.wasmTerm!.getScrollState().offset).toBe(term.getScrollbackLength() - expected);
         const delta = action === 'top' ? 3 : -3;
         wheel(delta, 1);
         flush();
@@ -116,18 +124,19 @@ for (const action of ['line', 'relative', 'top', 'bottom', 'write'] as const) {
 }
 
 for (const action of ['line', 'write'] as const) {
-  test(`reentrant ${action} from a scheduled wheel frame keeps later gestures responsive`, async () => {
+  test(`reentrant ${action} from a later wheel event keeps following gestures responsive`, async () => {
     await withFrames(async (flush) => {
       await session(({ term, wheel }) => {
         history(term);
         let calls = 0;
         term.onScroll(() => {
-          if (++calls !== 2) return; // first step is synchronous; interrupt the next frame
+          if (++calls !== 2) return; // interrupt the second input event, not a removed easing frame
           if (action === 'line') term.scrollToLine(10);
           else term.write('');
         });
-        wheel(-5, 1);
+        wheel(-2, 1);
         flush();
+        wheel(-3, 1);
         const expected = action === 'line' ? 10 : 5;
         expect(term.viewportY).toBe(expected);
         wheel(-3, 1);
@@ -138,7 +147,7 @@ for (const action of ['line', 'write'] as const) {
   });
 }
 
-test('a throwing animation observer cannot strand the active owner', async () => {
+test('a throwing scroll observer cannot strand the native position', async () => {
   await withFrames(async (flush) => {
     await session(({ term, wheel }) => {
       history(term);
@@ -146,8 +155,7 @@ test('a throwing animation observer cannot strand the active owner', async () =>
       const listener = term.onScroll(() => {
         throw error;
       });
-      const control = term as unknown as { smoothScrollTo(target: number): void };
-      expect(() => control.smoothScrollTo(5)).toThrow(error);
+      expect(() => term.scrollToLine(5)).toThrow(error);
       listener.dispose();
       flush();
       expect(term.viewportY).toBe(5);
@@ -158,7 +166,7 @@ test('a throwing animation observer cannot strand the active owner', async () =>
   });
 });
 
-test('a completed animation cannot clear a new animation started by its final observer', async () => {
+test('a completed native scroll cannot overwrite another scroll started by its observer', async () => {
   await withFrames(async (flush) => {
     await session(({ term, wheel }) => {
       history(term);
@@ -179,7 +187,7 @@ test('a completed animation cannot clear a new animation started by its final ob
   });
 });
 
-test('a cancelled frame cannot overwrite a replacement started during its observer', async () => {
+test('render frames cannot overwrite replacement native navigation', async () => {
   await withFrames(async (flush) => {
     await session(({ term, wheel }) => {
       history(term);
@@ -193,31 +201,25 @@ test('a cancelled frame cannot overwrite a replacement started during its observ
       wheel(-5, 1);
       flush();
       expect(term.viewportY).toBe(13);
-      expect(
-        (term as unknown as { scrollAnimationFrame?: number }).scrollAnimationFrame
-      ).toBeUndefined();
+      expect(term.wasmTerm!.getScrollState().offset).toBe(term.getScrollbackLength() - 13);
     }, 100);
   });
 });
 
-test('disposal from an animation observer does not schedule another scroll frame', async () => {
-  await withFrames(async (flush) => {
+test('disposal from a scroll observer leaves no scheduled render frame', async () => {
+  await withFrames(async (flush, _time, pending) => {
     await session(({ term, wheel }) => {
       history(term);
       term.onScroll(() => term.dispose());
       wheel(-5, 1);
-      expect(
-        (term as unknown as { scrollAnimationFrame?: number }).scrollAnimationFrame
-      ).toBeUndefined();
+      expect(pending()).toBe(0);
       flush();
-      expect(
-        (term as unknown as { scrollAnimationFrame?: number }).scrollAnimationFrame
-      ).toBeUndefined();
+      expect(pending()).toBe(0);
     }, 100);
   });
 });
 
-test('history and shifted active rows draw their own graphemes, including fractional animation offsets', async () => {
+test('history and shifted active rows draw their own graphemes, including quantized compatibility offsets', async () => {
   await session(({ term }) => {
     term.write('e\u0301\r\nn\u0303\r\n2\r\n3\r\n4\r\n5\r\n6');
     expect(term.getScrollbackLength()).toBe(1);
@@ -231,7 +233,8 @@ test('history and shifted active rows draw their own graphemes, including fracti
     const metrics = term.renderer!.getMetrics();
     for (const offset of [1, 1.25]) {
       painted.length = 0;
-      term.renderer!.render(term.wasmTerm!, true, offset, term, 0);
+      term.viewportY = offset;
+      term.renderer!.render(term.wasmTerm!, true, term.viewportY, term, 0);
       expect(painted).toContainEqual(['e\u0301', metrics.baseline]);
       expect(painted).toContainEqual(['n\u0303', metrics.height + metrics.baseline]);
       expect(painted).not.toContainEqual(['n\u0303', metrics.baseline]);
@@ -291,18 +294,16 @@ test('line/page wheel modes, invalid input and programmatic navigation remain pr
   });
 });
 
-test('rapid wheel input uses its pending destination and output cancels the old animation', async () => {
+test('rapid wheel input applies immediately and output preserves the native viewport', async () => {
   await session(async ({ term, wheel }) => {
     history(term);
     const h = term.renderer!.getMetrics().height;
     wheel(-2 * h);
     wheel(-3 * h);
-    const control = term as unknown as { targetViewportY: number; scrollAnimationFrame?: number };
-    expect(control.targetViewportY).toBe(5);
+    expect(term.getViewportY()).toBe(5);
     term.write('new output');
     // Output settles the pending reading position instead of jumping to bottom.
     expect(term.getViewportY()).toBe(5);
-    expect(control.scrollAnimationFrame).toBeUndefined();
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(term.getViewportY()).toBe(5);
   }, 100);
@@ -350,73 +351,50 @@ test('scrollbar dragging tracks document motion outside the canvas and stops on 
   });
 });
 
+// Explicitly approved policy replacement: smoothScrollDuration is deprecated;
+// native logical scroll commands are immediate, including between/within frames.
 for (const frameMs of [1000 / 30, 1000 / 60, 1000 / 144]) {
-  test(`smooth scrolling honors elapsed duration at ${Math.round(1000 / frameMs)} Hz`, async () => {
-    await withFrames(async (flush, time) => {
+  test(`native scrolling is immediate at ${Math.round(1000 / frameMs)} Hz regardless of deprecated duration`, async () => {
+    await withFrames(async (flush) => {
       await session(({ term, wheel }) => {
         history(term);
-        const elapsed: number[] = [];
-        for (const duration of [16.7, 17, 20, 100, 1000, 5000]) {
+        for (const duration of [0, 16.7, 17, 20, 100, 1000, 5000]) {
           term.scrollToBottom();
           term.options.smoothScrollDuration = duration;
-          const start = time();
           wheel(-5, 1);
-          let frames = 0;
-          const ctl = term as unknown as { scrollAnimationStartTime?: number };
-          while (
-            ctl.scrollAnimationStartTime !== undefined &&
-            frames++ < Math.ceil(duration / frameMs) + 2
-          )
-            flush(1);
-          expect(ctl.scrollAnimationStartTime).toBeUndefined();
           expect(term.viewportY).toBe(5);
-          const actual = time() - start;
-          expect(actual).toBeGreaterThanOrEqual(duration - 0.001);
-          expect(actual).toBeLessThanOrEqual(duration + frameMs + 0.001);
-          if (elapsed.length) expect(actual).toBeGreaterThanOrEqual(elapsed.at(-1)! - 0.001);
-          elapsed.push(actual);
+          flush(1);
+          expect(term.viewportY).toBe(5);
         }
       }, 100);
     }, frameMs);
   });
 }
 
-test('a retargeted wheel animation starts from the displayed position and finishes after its duration', async () => {
+test('continuous wheel input progresses before each frame and is never deferred until a gesture ends', async () => {
   await withFrames(async (flush) => {
     await session(({ term, wheel }) => {
       history(term);
-      wheel(-5, 1);
-      flush(3); // 50 ms into a 100 ms segment
-      const before = term.viewportY;
-      expect(before).toBeGreaterThan(0);
-      expect(before).toBeLessThan(5);
-      wheel(-3, 1);
-      expect(term.viewportY).toBe(before);
-      expect((term as unknown as { targetViewportY: number }).targetViewportY).toBe(8);
-      flush(3);
-      expect(term.viewportY).toBeGreaterThan(before);
-      expect(term.viewportY).toBeLessThan(8);
-      flush(4);
-      expect(term.viewportY).toBe(8);
-    }, 100);
+      for (let i = 1; i <= 30; i++) {
+        wheel(-1, 1);
+        expect(term.viewportY).toBe(i);
+        flush(1);
+        expect(term.viewportY).toBe(i);
+      }
+    }, 1000);
   });
 });
 
-test('changing the duration mid-flight does not rewind displayed content', async () => {
+test('changing a deprecated duration never moves the native viewport', async () => {
   await withFrames(async (flush) => {
     await session(({ term, wheel }) => {
       history(term);
       wheel(-5, 1);
-      flush(3);
-      const before = term.viewportY;
       term.options.smoothScrollDuration = 1000;
-      flush(1);
-      expect(term.viewportY).toBeGreaterThanOrEqual(before);
       flush(30);
-      expect(term.viewportY).toBeGreaterThan(before);
-      expect(term.viewportY).toBeLessThan(5);
-      flush(31);
       expect(term.viewportY).toBe(5);
+      wheel(-3, 1);
+      expect(term.viewportY).toBe(8);
     }, 100);
   });
 });

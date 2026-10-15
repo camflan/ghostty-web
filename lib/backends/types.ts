@@ -219,13 +219,6 @@ export interface TerminalBackend {
   scrollViewport?(command: NativeScrollCommand): void;
   /** The stable live view of the visible native viewport. */
   getRenderView?(): NativeRenderView;
-  /**
-   * @deprecated Pre-migration host compatibility only (`writeWithViewport`):
-   * pin `offset` rows above the bottom, write, report the resolved offset
-   * (even on error), then return the native viewport to the bottom. New hosts
-   * use `scrollViewport` and plain writes, which never move the viewport.
-   */
-  preserveViewport?(offset: number, write: () => void, update: (offset: number) => void): void;
   /** Real cell metrics for size reports and the native pixel size. */
   setCellPixelSize?(widthPx: number, heightPx: number): void;
   /** Current Kitty keyboard protocol flags of the active screen. */

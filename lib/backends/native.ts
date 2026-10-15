@@ -1500,42 +1500,7 @@ export class NativeTerminal implements TerminalBackend {
     this.stale = true;
   }
 
-  /**
-   * @deprecated Pre-migration host compatibility only (`writeWithViewport`).
-   * Pins `offset` rows above the bottom of the primary screen, writes, reports
-   * the native result (also when the write threw: upstream distinguishes
-   * reset/ED3 from pruning at the exact byte), then returns the viewport to
-   * the bottom as that host expects. Nothing else parks the viewport; remove
-   * this (and `nativeViewport`) with its last caller.
-   */
-  preserveViewport(offset: number, write: () => void, update: (offset: number) => void): void {
-    if (!this.isAlternateScreen()) {
-      const history = this.getScrollbackLength();
-      offset = Math.max(0, Math.min(history, Math.floor(offset)));
-      this.scrollViewport(offset > 0 ? { kind: 'row', row: history - offset } : { kind: 'bottom' });
-    }
-    try {
-      write();
-    } finally {
-      try {
-        update(this.isAlternateScreen() ? 0 : (this.nativeViewport()?.offset ?? 0));
-      } finally {
-        this.scrollViewport({ kind: 'bottom' });
-      }
-    }
-  }
-
-  /** @deprecated With `preserveViewport`: null when following, else the first row and rows above the bottom. */
-  private nativeViewport(): { row: number; offset: number } | null {
-    const state = this.getScrollState();
-    if (state.following) return null;
-    return { row: state.offset, offset: Math.max(0, state.total - state.len - state.offset) };
-  }
-
-  // ==========================================================================
-  // History and on-demand cell data (grid references; never moves the viewport)
-  // ==========================================================================
-
+  // History and active-buffer queries never move the native viewport.
   getScrollbackLength(): number {
     const s = this.scratch!;
     this.getData('SCROLLBACK_ROWS', s.out);

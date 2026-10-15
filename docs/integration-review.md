@@ -182,3 +182,24 @@ Validation: **1,181 Bun tests**, **133 native / 99 legacy canonical browser chec
 with zero skips/flaky results and unchanged reviewed images. Public coordinate
 conventions and the separately deferred coordinate-documentation findings remain
 unchanged. No upstream source, patch, or WASM changes were required.
+
+## Upstream host-abstraction migration
+
+The round-4/5 easing and temporary viewport-parking descriptions above are historical.
+The approved structural follow-up replaces those mechanisms rather than adding more
+cancellation flags. Native `Terminal`/`Screen`/`PageList` now permanently own the
+viewport; TypeScript mirrors `Surface`, `Termio`, renderer State/Thread and `apprt`.
+See [host architecture](./upstream-host-architecture.md) for exact owners, source
+tracing, compatibility changes, the native-selection gesture gate and remaining limits.
+
+Continuous Chromium wheel input is checked for progress **during** the gesture.
+Scrollbar lifetime tests cover stale fades, empty-history release, button/pointer
+ownership and teardown. Existing held-thumb output/pruning/resize and reentrant
+notification tests remain; easing-specific expectations now assert the approved
+immediate whole-row policy. No image baseline was regenerated.
+
+Validation: **1,255 Bun tests**, **134 native / 100 legacy canonical browser checks**,
+**398 / 351 required core checks**, **157 independent reference checks**, and
+**6 package-consumer checks** passed. Formatting, lint, types, native shipping build,
+workflow lint and upstream trace validation passed. Native source/pin/WASM remain
+unchanged. Firefox, WebKit and physical-device parity are not established.

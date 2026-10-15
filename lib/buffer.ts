@@ -139,7 +139,7 @@ export class Buffer implements IBuffer {
     if (this.bufferType === 'alternate') return 0;
     // Public buffer coordinates count from oldest history, while Terminal's
     // internal viewport offset counts upward from the live screen. Match the
-    // renderer's whole-row mapping during fractional smooth scrolling.
+    // renderer's whole-row compatibility mapping.
     const base = this.baseY;
     return Math.max(0, Math.min(base, base - Math.floor(this.terminal.getViewportY())));
   }

@@ -10,7 +10,9 @@
  * - Dirty line optimization for 60 FPS
  */
 
+import type { NativeScrollState } from './backends/types';
 import type { ITheme } from './interfaces';
+import { readState } from './renderer/state';
 import type { SelectionManager } from './selection-manager';
 import type { GhosttyCell, ILink } from './types';
 import { CellFlags } from './types';
@@ -18,6 +20,9 @@ import { CellFlags } from './types';
 // Interface for objects that can be rendered
 export interface IRenderable {
   readonly backend?: 'legacy' | 'libghostty-vt';
+  /** Native visible viewport, distinct from the public active-buffer facade. */
+  getRenderView?(): IRenderable;
+  getScrollState?(): NativeScrollState;
   getLine(y: number): GhosttyCell[] | null;
   getCursor(): {
     x: number;
@@ -133,13 +138,14 @@ export class CanvasRenderer {
 
   // Cursor blinking state
   private cursorVisible: boolean = true;
-  private cursorBlinkInterval?: number;
+  private cursorBlinkSince?: number;
   private lastCursorPosition: { x: number; y: number } = { x: 0, y: 0 };
   private lastCursorVisible = true;
   private lastNativeCursorStyle: 'block' | 'bar' | 'underline' = 'block';
 
   // Viewport tracking (for scrolling)
   private lastViewportY: number = 0;
+  private lastScrollbarState = '';
 
   // Current buffer being rendered (for grapheme lookups)
   private currentBuffer: IRenderable | null = null;
@@ -334,20 +340,26 @@ export class CanvasRenderer {
     forceAll: boolean = false,
     viewportY: number = 0,
     scrollbackProvider?: IScrollbackProvider,
-    scrollbarOpacity: number = 1
+    scrollbarOpacity: number = 1,
+    timestamp: number = performance.now()
   ): void {
     // Synchronized output: draw the held frame (every read below, including
     // graphemes, cursor and dirty tracking, then comes from it).
     let heldHistory: number | undefined;
     let held = false;
-    this.sourceBuffer = buffer;
-    if (buffer.getPresentation && viewportY === 0 && !this.selectionManager?.hasSelection()) {
-      const presentation = buffer.getPresentation();
-      if (presentation !== buffer) {
+    const state = readState(buffer);
+    this.sourceBuffer = state.source;
+    const nativeViewport = state.scroll !== undefined;
+    if (state.scroll)
+      viewportY = Math.max(0, state.scroll.total - state.scroll.len - state.scroll.offset);
+    buffer = state.live;
+    if (state.source.getPresentation && viewportY === 0 && !this.selectionManager?.hasSelection()) {
+      const presentation = state.source.getPresentation();
+      if (presentation !== state.source) {
         held = true;
         heldHistory = presentation.getScrollbackLength?.();
+        buffer = presentation;
       }
-      buffer = presentation;
     }
 
     // Live frames use the latest theme; a held frame keeps the theme it was
@@ -366,11 +378,16 @@ export class CanvasRenderer {
     const cursor = buffer.getCursor();
     const dims = buffer.getDimensions();
     const scrollbackLength =
-      heldHistory ?? (scrollbackProvider ? scrollbackProvider.getScrollbackLength() : 0);
+      heldHistory ??
+      (state.scroll
+        ? state.scroll.total - state.scroll.len
+        : scrollbackProvider
+          ? scrollbackProvider.getScrollbackLength()
+          : 0);
     // Smooth animation may be fractional, but cell/grid lookups always use the
     // same whole-row boundary, including glyphs that overflow from a neighbor.
-    const rowOffset = Math.max(0, Math.floor(viewportY));
-    this.currentHistory = scrollbackProvider;
+    const rowOffset = nativeViewport ? 0 : Math.max(0, Math.floor(viewportY));
+    this.currentHistory = nativeViewport ? undefined : scrollbackProvider;
     this.currentRowOffset = rowOffset;
     this.currentHistoryLength = scrollbackLength;
 
@@ -397,10 +414,19 @@ export class CanvasRenderer {
       forceAll = true; // Force full render after resize
     }
 
-    // Force re-render when viewport changes (scrolling)
-    if (viewportY !== this.lastViewportY) {
+    // Native RenderState owns viewport invalidation. Legacy presentation still
+    // uses the compatibility history compositor.
+    if (!nativeViewport && viewportY !== this.lastViewportY) {
       forceAll = true;
       this.lastViewportY = viewportY;
+    }
+
+    // The overlay is host presentation, not native dirty state. Repaint its old
+    // pixels when opacity/range changes, including the last frame that hides it.
+    const scrollbarState = `${viewportY}:${scrollbackLength}:${dims.rows}:${scrollbarOpacity}`;
+    if (scrollbarState !== this.lastScrollbarState) {
+      forceAll = true;
+      this.lastScrollbarState = scrollbarState;
     }
 
     // Check if cursor position changed or if blinking (need to redraw cursor line)
@@ -410,6 +436,12 @@ export class CanvasRenderer {
       : this.cursorStyle;
     if (nativeCursor && cursor.blinking !== undefined && cursor.blinking !== this.cursorBlink) {
       this.setCursorBlink(cursor.blinking);
+    }
+    // RendererThread is the only frame/clock owner. Keep the existing 530ms
+    // compatibility period without an independent interval that survives stops.
+    if (this.cursorBlink && this.cursorBlinkSince !== undefined) {
+      this.cursorVisible =
+        Math.floor(Math.max(0, timestamp - this.cursorBlinkSince) / 530) % 2 === 0;
     }
     // Visibility (DECTCEM) is reported by both engines; the reported style is
     // native-only policy (legacy draws the cursorStyle option).
@@ -517,7 +549,7 @@ export class CanvasRenderer {
     for (let y = 0; y < dims.rows; y++) {
       // When scrolled, always force render all lines since we're showing scrollback
       const needsRender =
-        viewportY > 0
+        !nativeViewport && viewportY > 0
           ? true
           : forceAll || buffer.isRowDirty(y) || selectionRows.has(y) || hyperlinkRows.has(y);
 
@@ -559,7 +591,7 @@ export class CanvasRenderer {
     // Link underlines are drawn during cell rendering (see renderCell)
 
     // Render cursor (only if we're at the bottom, not scrolled)
-    if (viewportY === 0 && cursor.visible && this.cursorVisible) {
+    if ((nativeViewport || viewportY === 0) && cursor.visible && this.cursorVisible) {
       this.renderCursor(cursor.x, cursor.y, effectiveCursorStyle);
     }
 
@@ -597,7 +629,7 @@ export class CanvasRenderer {
       if (y < viewportY && scrollbackProvider) {
         // This row is from scrollback (upper part of viewport)
         // Get from end of scrollback buffer
-        // Floor viewportY for array access (handles fractional values during smooth scroll)
+        // Defensive quantization for legacy callers of the renderer
         const scrollbackOffset = scrollbackLength - Math.floor(viewportY) + y;
         return scrollbackProvider.getScrollbackLine(scrollbackOffset);
       }
@@ -986,18 +1018,12 @@ export class CanvasRenderer {
   // ==========================================================================
 
   private startCursorBlink(): void {
-    // xterm.js uses ~530ms blink interval
-    this.cursorBlinkInterval = window.setInterval(() => {
-      this.cursorVisible = !this.cursorVisible;
-      // Note: Render loop should redraw cursor line automatically
-    }, 530);
+    this.cursorBlinkSince = performance.now();
+    this.cursorVisible = true;
   }
 
   private stopCursorBlink(): void {
-    if (this.cursorBlinkInterval !== undefined) {
-      clearInterval(this.cursorBlinkInterval);
-      this.cursorBlinkInterval = undefined;
-    }
+    this.cursorBlinkSince = undefined;
     this.cursorVisible = true;
   }
 

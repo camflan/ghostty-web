@@ -9,8 +9,8 @@
  * - `src/Surface.zig` `deinit` (801-825): input and render sources stop before the state
  *   they reach is released.
  *
- * Browser adaptation: DOM listeners are the toolkit event sources. This class only owns
- * their lifetime, so teardown removes every one of them in one step and nothing registered
+ * Browser adaptation: DOM listeners are the toolkit event sources. This class owns focus containment and
+ * listener lifetime, so teardown removes every one of them in one step and nothing registered
  * after disposal can resurrect input. Event decoding stays with the existing input and
  * selection handlers; this is not a second input or clipboard API.
  */
@@ -49,6 +49,28 @@ export class BrowserSurface {
     target.addEventListener(type, listener as EventListenerOrEventListenerObject, options);
     const capture = typeof options === 'boolean' ? options : options?.capture === true;
     this.listeners.push([target, type, listener, capture]);
+  }
+
+  /** Toolkit focus adapter: internal DOM transfers are not Surface focus changes. */
+  observeFocus(parent: HTMLElement, changed: (focused: boolean) => void): void {
+    if (this.isDisposed) return;
+    const containsActiveElement = () => {
+      const root = parent.getRootNode();
+      const active = 'activeElement' in root ? (root as Document | ShadowRoot).activeElement : null;
+      return !!active && parent.contains(active);
+    };
+    this.listen(parent, 'focusin', () => changed(parent.ownerDocument.hasFocus()));
+    this.listen(parent, 'focusout', (event) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && parent.contains(next)) return;
+      changed(false);
+    });
+    const view = parent.ownerDocument.defaultView;
+    if (view) {
+      this.listen(view, 'focus', () => changed(containsActiveElement()));
+      this.listen(view, 'blur', () => changed(false));
+    }
+    changed(containsActiveElement() && parent.ownerDocument.hasFocus());
   }
 
   /** Remove every listener registered through `listen`. Idempotent. */

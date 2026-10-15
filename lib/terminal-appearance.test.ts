@@ -441,8 +441,8 @@ describe('runtime font change', () => {
           resizes++;
           resize(cols, rows);
         };
-        const internals = term as unknown as { scrollbarOpacity: number };
-        internals.scrollbarOpacity = 0.25; // e.g. mid-fade
+        const internals = term as unknown as { scrollbar: { getOpacity(): number } };
+        internals.scrollbar.getOpacity = () => 0.25; // adapter's current visual state, e.g. mid-fade
 
         term.options.fontSize = 20;
 

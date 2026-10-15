@@ -139,20 +139,11 @@ test('review: ordinary modifier keys remain browser-owned when native encoding i
   });
 });
 
-test('review: cancelling wheel animation settles at its whole-row target', async () => {
+test('review: wheel ownership transfer preserves the native viewport', async () => {
   for (const action of ['relative', 'custom', 'tracking'] as const) {
     await session(({ term, canvas }) => {
       for (let i = 0; i < 30; i++) term.write(`line ${i}\r\n`);
-      const control = term as unknown as {
-        targetViewportY: number;
-        scrollAnimationFrame?: number;
-        scrollAnimationStartTime?: number;
-      };
-      // A state reached by the real smoothing loop, frozen at a deterministic point.
-      term.viewportY = 2.5;
-      control.targetViewportY = 3;
-      control.scrollAnimationStartTime = Date.now();
-      control.scrollAnimationFrame = requestAnimationFrame(() => {});
+      term.scrollToLine(3);
       const scrolls: number[] = [];
       term.onScroll((row) => scrolls.push(row));
       if (action === 'relative') term.scrollLines(-1);
@@ -165,25 +156,21 @@ test('review: cancelling wheel animation settles at its whole-row target', async
         wheel(canvas);
       }
       expect(term.getViewportY()).toBe(action === 'relative' ? 4 : 3);
-      expect(control.scrollAnimationFrame).toBeUndefined();
-      expect(scrolls).toEqual([action === 'relative' ? 4 : 3]);
+      expect(scrolls).toEqual(action === 'relative' ? [4] : []);
     });
   }
 });
 
-test('review round 2: sub-frame and invalid scroll durations settle without runaway animation', async () => {
+test('review: deprecated duration values cannot change immediate native scroll behavior', async () => {
   await session(({ term, canvas }) => {
     for (let i = 0; i < 30; i++) term.write(`line ${i}\r\n`);
-    const control = term as unknown as { animateScroll(): void; scrollAnimationFrame?: number };
     const rows: number[] = [];
     term.onScroll((row) => rows.push(row));
     for (const duration of [0, 1, 10, 16, 1000 / 60, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       term.scrollToBottom();
       term.options.smoothScrollDuration = duration;
       wheel(canvas, -3 * term.renderer!.getMetrics().height);
-      control.animateScroll();
       expect(term.getViewportY()).toBe(3);
-      expect(control.scrollAnimationFrame).toBeUndefined();
     }
     expect(
       rows.every((row) => Number.isInteger(row) && row >= 0 && row <= term.getScrollbackLength())
@@ -191,26 +178,17 @@ test('review round 2: sub-frame and invalid scroll durations settle without runa
   });
 });
 
-test('review round 2: explicit navigation wins even when its target equals the pre-cancel position', async () => {
+test('review: explicit navigation always applies its final destination', async () => {
   for (const action of ['bottom', 'line', 'relative', 'top'] as const) {
     await session(({ term }) => {
       for (let i = 0; i < 30; i++) term.write(`line ${i}\r\n`);
       const limit = term.getScrollbackLength();
-      const control = term as unknown as {
-        targetViewportY: number;
-        scrollAnimationFrame?: number;
-        scrollAnimationStartTime?: number;
-      };
-      term.viewportY = action === 'top' ? limit : 0;
-      control.targetViewportY = action === 'top' ? limit - 3 : 3;
-      control.scrollAnimationStartTime = Date.now();
-      control.scrollAnimationFrame = requestAnimationFrame(() => {});
+      term.scrollToLine(action === 'top' ? limit - 3 : 3);
       if (action === 'bottom') term.scrollToBottom();
       if (action === 'line') term.scrollToLine(0);
-      if (action === 'relative') term.scrollLines(3); // pending target 3 minus 3 = 0
+      if (action === 'relative') term.scrollLines(3);
       if (action === 'top') term.scrollToTop();
       expect(term.getViewportY()).toBe(action === 'top' ? limit : 0);
-      expect(control.scrollAnimationFrame).toBeUndefined();
     });
   }
 });

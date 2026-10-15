@@ -84,6 +84,9 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Verify upstream host abstraction trace
+        run: bun run check:upstream-trace
+
       - name: Run tests
         run: bun test
 

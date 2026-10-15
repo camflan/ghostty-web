@@ -465,3 +465,68 @@ rtest('scroll.nested-resize-delivers-final-position', async (ctx) => {
   ctx.checks.equal('clamped-offset', after.viewportY, before.scrollbackLength - 6);
   ctx.checks.equal('one-final-scroll-event', (await fx.term.events()).scrolls, [after.viewportY]);
 });
+
+rtest('scroll.continuous-frame-aligned-input-progresses-during-gesture', async (ctx) => {
+  const { fx, g } = await fixture(ctx, 100); // deprecated value must not resurrect easing
+  await ctx.harness.page.evaluate(
+    ([id, cellHeight]) => {
+      const probe = {
+        pixels: 0,
+        samples: [] as { expected: number; actual: number }[],
+        remove: () => {},
+      };
+      const host = document.querySelector('.host')!;
+      const listener = (event: Event) => {
+        const wheel = event as WheelEvent;
+        probe.pixels -= wheel.deltaY;
+        probe.samples.push({
+          expected: Math.trunc(probe.pixels / cellHeight + 1e-9),
+          actual: window.__ghosttyRegression.viewport(id).viewportY,
+        });
+      };
+      host.addEventListener('wheel', listener, true);
+      probe.remove = () => host.removeEventListener('wheel', listener, true);
+      (window as unknown as { scrollProbe: typeof probe }).scrollProbe = probe;
+    },
+    [fx.term.id, g.cellH] as const
+  );
+  const cdp = await ctx.harness.page.context().newCDPSession(ctx.harness.page);
+  try {
+    await cdp.send('Input.synthesizeScrollGesture', {
+      x: g.rect.left + g.rect.width / 3,
+      y: g.rect.top + g.rect.height / 2,
+      yDistance: 400,
+      speed: 1200,
+      gestureSourceType: 'mouse',
+      preventFling: true,
+    });
+    const samples = await ctx.harness.page.evaluate(() => {
+      const probe = (
+        window as unknown as {
+          scrollProbe: { samples: { expected: number; actual: number }[]; remove(): void };
+        }
+      ).scrollProbe;
+      probe.remove();
+      return probe.samples;
+    });
+    ctx.checks.equal('multiple-input-frames', samples.length > 3, true);
+    ctx.checks.equal(
+      'progress-at-every-wheel-event',
+      samples.map((s) => s.actual),
+      samples.map((s) => s.expected)
+    );
+    ctx.checks.equal(
+      'meaningful-progress-before-end',
+      samples.slice(0, -1).some((s) => s.actual > 5),
+      true
+    );
+    const final = samples.at(-1)!.expected;
+    ctx.checks.equal(
+      'rows-follow-native-position',
+      await shownLines(fx),
+      expectedViewport(fx, final)
+    );
+  } finally {
+    await cdp.detach();
+  }
+});

@@ -583,6 +583,12 @@
       "unsupported": []
     },
     {
+      "id": "scroll.continuous-frame-aligned-input-progresses-during-gesture",
+      "required": ["web-pinned", "web-candidate"],
+      "gaps": [],
+      "unsupported": []
+    },
+    {
       "id": "scroll.thumb-drag-preserves-anchor-during-output",
       "required": ["web-candidate"],
       "gaps": [],

@@ -193,25 +193,16 @@ test('a throwing scroll listener cannot strand replies from the anchored write',
   expect(replies.join('')).toBe('\x1b[0n');
 });
 
-test('output settles a pending wheel destination and preserves that content', async () => {
+test('output preserves the already-committed native wheel destination', async () => {
   const term = await terminal();
-  const control = term as unknown as {
-    targetViewportY: number;
-    scrollAnimationFrame?: number;
-    scrollAnimationStartTime?: number;
-  };
   const top = term.getScrollbackLength() - 3;
   const targetRows = Array.from({ length: term.rows }, (_, y) =>
     term.buffer.active.getLine(top + y)!.translateToString(true)
   );
-  term.viewportY = 0;
-  control.targetViewportY = 3;
-  control.scrollAnimationStartTime = Date.now();
-  control.scrollAnimationFrame = requestAnimationFrame(() => {});
+  term.scrollLines(-3);
   term.write('new\r\n');
   expect(viewed(term)).toEqual(targetRows);
   expect(term.viewportY).toBe(4);
-  expect(control.scrollAnimationFrame).toBeUndefined();
 });
 
 test('reading history through synchronized output preserves selection and the live-screen capture', async () => {
@@ -322,7 +313,7 @@ for (const sequence of ['\x1bc', '\x1b[3J', '\x1b[H\x1b[2J\x1b[3J']) {
   });
 }
 
-test('resize clamps the viewport and pending wheel target before notifying observers', async () => {
+test('resize resolves the native viewport before notifying observers', async () => {
   const term = await terminal();
   term.scrollToTop();
   const oldHistory = term.getScrollbackLength();
@@ -330,9 +321,7 @@ test('resize clamps the viewport and pending wheel target before notifying obser
   term.onScroll((offset) => scrolls.push(offset));
   term.onResize(() => {
     expect(term.viewportY).toBeLessThanOrEqual(term.getScrollbackLength());
-    expect((term as unknown as { targetViewportY: number }).targetViewportY).toBeLessThanOrEqual(
-      term.getScrollbackLength()
-    );
+    expect(term.wasmTerm!.getScrollState().offset).toBeGreaterThanOrEqual(0);
   });
   term.resize(80, 10);
   expect(term.getScrollbackLength()).toBeLessThan(oldHistory);

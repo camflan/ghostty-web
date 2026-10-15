@@ -32,10 +32,13 @@ legacy. Native layouts, bit positions and enums come from `ghostty_type_json`.
 Public numeric key constants stay stable and are mapped to native names.
 
 The native adapter caches render snapshots, decodes dirty rows through the bulk
-row API, and accumulates dirty state until cleaned. History reads use grid refs
-without moving the native viewport; JavaScript retains viewport/selection policy
-for this first migration. The old patch is archived in `patches/legacy/` and is
-not applied to the upgraded submodule.
+row API, and accumulates dirty state until cleaned. Ghostty permanently owns the
+native viewport. Rendering reads visible native rows; public active-buffer and
+history reads use separate native grid references without moving the viewport.
+JavaScript retains input routing and browser gesture policy, not a second native
+reading position. The old patch is archived in `patches/legacy/` and is not applied
+to the upgraded submodule. See [host architecture](./upstream-host-architecture.md)
+for the upstream-shaped host/runtime boundaries.
 
 Native replies are copied immediately out of callbacks and drained in order;
 clipboard-read callbacks are not enabled. Host integration supplies real CSS cell
@@ -44,8 +47,9 @@ color metadata, and uses terminal-derived native keyboard options for ordinary
 keys as well as Kitty mode. Native mouse events now use Ghostty's mouse encoder;
 the browser retains gesture ownership, wheel granularity and the string transport
 boundary (see the mouse slice below). Browser clipboard/shortcut policy remains in
-JavaScript. Structured title/bell effects, native selection, synchronized-output
-presentation and other improvements remain later work.
+JavaScript. `Termio` delivers copied title/bell/reply effects after parsing; native
+selection formatting and synchronized-output presentation are integrated. Native
+selection **gesture** adoption remains a separate compatibility gate.
 
 ## Scrollback contract: native retention
 
@@ -95,23 +99,27 @@ below preserves the viewed content on native without changing the retention budg
 
 ## Final validation
 
-The required baseline, including both integration review rounds and the approved
-output/background policies and selected round-3/4/5 review fixes, was validated on **2026-10-14**:
+The required baseline, including the upstream host-abstraction migration, was
+validated on **2026-10-15**:
 
-- **1,181 native-default Bun tests passed**, with no accepted-failure outcomes.
-- Required core: **327 native / 280 legacy passes** (269 / 222 behavior cases plus
-  58 controls per engine), with no missing cases or matrix blockers.
-- Required browser: **133 native / 99 legacy passes**, zero skips, retries or flaky
-  results in the canonical container. All eight reviewed scene images are unchanged.
+- **1,255 native-default Bun tests passed**, with no accepted-failure outcomes.
+- Required core entry points: **398 native / 351 legacy passes**, including scope,
+  identity and negative controls. The behavior matrix separately verifies exact
+  membership, rather than treating controls as extra terminal behavior cases.
+- Required browser: **134 native / 100 legacy passes**, zero skips, retries or flaky
+  results in the canonical Chromium container. All eight reviewed scene images are unchanged.
 - Remaining gap scope: **1 native / 50 legacy core cases**, and **0 native /
-  31 legacy browser cases**. The unresolved cases failed their earlier explicit
-  gap runs (exit **1**); they are not passing regression coverage. The native
-  history-preservation case now passes its original assertion in the required
-  suite. Gap counts overlap in findings and are not unique bug counts.
-- The independently rebuilt upstream reference passed **157 checks**; the real
-  package consumer passed **6 checks**. Formatting, lint, both TypeScript projects,
-  and the full native shipping build passed. Workflow lint and shellcheck passed
-  at the earlier migration checkpoint; their files are unchanged here.
+  31 legacy browser cases**. These are not passing regression coverage. Earlier
+  explicit gap runs exited **1**; no gap was waived or required case demoted here.
+  Gap counts overlap in findings and are not unique bug counts.
+- The independently built, hash-verified upstream reference passed **157 checks**;
+  the real package consumer passed **6 checks**. Formatting, lint, both TypeScript
+  projects, the full native shipping build, workflow lint and **12 upstream trace
+  mappings** passed. The rebuilt WASM is byte-identical to the reviewed artifact.
+
+One pre-cutover full-suite run trapped in native `vt_write`; the isolated reproducer
+and subsequent full runs did not reproduce it. No failure allowance was introduced;
+its cause is unresolved, not claimed fixed by the ownership migration.
 
 The earlier totals of 804 Bun tests, 307 core tests per engine and 105 browser
 tests included accepted failures or applicability-only checks. They are **not**
@@ -537,14 +545,13 @@ query/render mismatch that remains a compatibility decision, not a claimed fix.
 ## Approved output and default-background policies
 
 The native host preserves its reading position when output arrives while scrolled
-back. During parsing it delegates to the upstream viewport state machine, which
+back. The upstream viewport state machine continuously owns that position and
 already distinguishes ED3/RIS from retention pruning at the exact byte boundary.
-After parsing it reads back the native scrollbar position and returns the active
-native viewport to the bottom. Render-state refreshes temporarily use the bottom
-as well, so a synchronized-output hold beginning mid-write captures the live screen,
-not history. No native source patch, input pre-parser, or selection borrowing is
-needed. This replaces the initial tracked-ref approach, which could not distinguish
-history clear from pruning after a large combined write.
+The initial integration temporarily installed a host offset for each write and
+parked the viewport at the bottom afterward. The host-abstraction migration removes
+that workaround: rendering reads the actual native viewport, while public active
+reads and hold capture use active-screen grid references. No native source patch,
+input pre-parser, selection borrowing or routine bottom/restore operation is needed.
 
 A pruned anchor clamps to the oldest retained content. Reset/history clear resumes
 following; entering alternate screen shows its live area and exiting restores the
@@ -553,9 +560,9 @@ followed by output exceeding the budget and primary/alternate round trips.
 
 Typing and paste resume following before their data is emitted (and before a
 synchronous PTY echo); modifier-only/release and mouse reports do not. Program replies
-never count as user input. Pending wheel destinations settle before anchoring without
-losing fractional wheel remainder. Resize clamps both the viewport and pending target
-before observers run. Anchored scroll notifications survive a throwing reply, bell,
+never count as user input. Whole-row wheel commands apply immediately; only fractional
+input remainder is retained. Resize reads back the native viewport before observers
+run, with no host target to clamp. Scroll notifications survive a throwing reply, bell,
 or title listener; reentrant navigation owns its own notifications and the original
 error is preserved if a scroll listener also throws.
 
